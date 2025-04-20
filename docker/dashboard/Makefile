@@ -5,3 +5,4 @@ fast:
 all: Dockerfile
 	tar --transform 's|^dashboard/||' -czvf apps.tgz dashboard/*
 	docker build --no-cache -t my_dashboard .
+

@@ -5,3 +5,4 @@ fast: Dockerfile
 all: Dockerfile
 	tar --transform 's|^etl/||' -czvf apps.tgz etl/*
 	docker build --no-cache -t my_etl .
+
