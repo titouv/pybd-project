@@ -167,11 +167,6 @@ date_range_store = dcc.Store(
     id="date-range-store",
     data={"start_date": df["Date"].min(), "end_date": df["Date"].max()},
 )
-xaxis_range_store = dcc.Store(id="xaxis-range-store", data=None)
-date_range_store = dcc.Store(
-    id="date-range-store",
-    data={"start_date": df["Date"].min(), "end_date": df["Date"].max()},
-)
 
 # Wrapping main content in cards
 tab1_layout = html.Div(
@@ -179,22 +174,17 @@ tab1_layout = html.Div(
         bollinger_state_store,
         xaxis_range_store,
         date_range_store,
-        xaxis_range_store,
-        date_range_store,
         dbc.Card(
             dbc.CardBody(
                 [
                     # Controls: Timeframe, Chart Type, and Bollinger Window
-                    # Controls: Timeframe, Chart Type, and Bollinger Window
                     html.Div(
                         [
-                            # Timeframe Selector
                             # Timeframe Selector
                             html.Div(
                                 [
                                     html.H5(
                                         "Select Timeframe",
-                                        style={"marginBottom": "10px"},
                                         style={"marginBottom": "10px"},
                                     ),
                                     dcc.DatePickerRange(
@@ -203,8 +193,6 @@ tab1_layout = html.Div(
                                         max_date_allowed=df["Date"].max(),
                                         start_date=df["Date"].min(),
                                         end_date=df["Date"].max(),
-                                        display_format="YYYY-MM-DD",
-                                        style={"width": "300px"},
                                         display_format="YYYY-MM-DD",
                                         style={"width": "300px"},
                                     ),
@@ -277,7 +265,6 @@ tab1_layout = html.Div(
                             "display": "flex",
                             "alignItems": "center",
                             "justifyContent": "space-between",
-                            "justifyContent": "space-between",
                             "marginBottom": "20px",
                         },
                     ),
@@ -326,13 +313,6 @@ tab1_layout = html.Div(
                                             for _, row in df.drop_duplicates(
                                                 "Company"
                                             ).iterrows()
-                                            {
-                                                "label": row["CompanyDisplay"],
-                                                "value": row["Company"],
-                                            }
-                                            for _, row in df.drop_duplicates(
-                                                "Company"
-                                            ).iterrows()
                                         ],
                                         value=[],
                                         multi=True,
@@ -359,8 +339,7 @@ tab1_layout = html.Div(
         ),
         footer,
     ],
-    style={"backgroundColor": theme["background"], "padding": "0px"},
-    style={"backgroundColor": theme["background"], "padding": "0px"},
+    style={"backgroundColor": theme["background"], "padding": "10px"},
 )
 
 
@@ -396,7 +375,6 @@ def update_chart(
     bollinger_state,
     window_size,
     checkbox_ids,
-    xaxis_range,
     xaxis_range,
 ):
     print("Callback triggered!")
@@ -503,9 +481,6 @@ def update_chart(
 
     for company in selected_companies:
         company_data = filtered_df[filtered_df["Company"] == company]
-        company_display = df[df["Company"] == company]["CompanyDisplay"].iloc[0]
-
-        # Main price trace
         company_display = df[df["Company"] == company]["CompanyDisplay"].iloc[0]
 
         # Main price trace
@@ -800,7 +775,7 @@ def update_company_table(
             table_rows.append(
                 html.Div(
                     [
-                        # Stability
+                        # Riskiness with colorful badge
                         html.Div(
                             html.Span(
                                 stability.value["label"],
