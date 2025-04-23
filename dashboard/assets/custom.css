@@ -33,3 +33,8 @@ body {
 .hide-dropdown-selection .Select-value {
     display: none !important;
 }
+
+.bollinger-slider {
+    width: 600px;
+    margin: 0 auto; /* Center the slider */
+}

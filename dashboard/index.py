@@ -27,7 +27,8 @@ layout = dbc.Container(
             ],
         ),
         html.Div(id="tabs-content"),
-    ]
+    ],
+    fluid = True,
 )
 
 
