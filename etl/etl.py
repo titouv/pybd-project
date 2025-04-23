@@ -234,9 +234,43 @@ def store_files(start:str, end:str, website:str, db:TSDB):
     
 
     db.df_write(daystocks_db_dataframe, 'daystocks')
+
+    # create stocks for boursorama
+    stocks_db_dataframe = pd.DataFrame(
+        columns=[
+           "date", "cid", "value", "volume"
+        ],
+    )
+
+    # default index for raw_boursorama is a "date" and "symbol"
+    # we want to convert this index to a "date" only
+    raw_boursorama = raw_boursorama.drop(columns=['symbol'])
+    raw_boursorama.reset_index(inplace=True)
+
+    raw_boursorama['date'] = pd.to_datetime(raw_boursorama['level_0'])
+
+    stocks_db_dataframe['date'] =  raw_boursorama['date']
+
+    def get_clean_last_boursorama(df):
+        """last is of object type and sometimes ends with (c) or (s)"""
+        return [
+            float(re.split("\\(.\\)$", str(x))[0].replace(" ", "").replace(",", "."))
+            for x in df["last"]
+        ]
+
+    stocks_db_dataframe['cid'] = raw_boursorama['company_id']
+    stocks_db_dataframe['value'] = get_clean_last_boursorama(raw_boursorama)
+    stocks_db_dataframe['volume'] = raw_boursorama['volume']
+    stocks_db_dataframe
+
+    db.df_write(stocks_db_dataframe, 'stocks')
+
+
+    
+    
     
 
-
+     
 
 
 
