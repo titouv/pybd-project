@@ -1,12 +1,15 @@
 import pandas as pd
 from dash import dcc, html, ALL, callback_context, dash
+from dash import dcc, html, ALL, callback_context, dash
 import dash.dependencies as ddep
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import colorsys
 from enum import Enum
 import random
+import random
 
+from app import app, db
 from app import app, db
 
 theme = {
@@ -164,6 +167,11 @@ date_range_store = dcc.Store(
     id="date-range-store",
     data={"start_date": df["Date"].min(), "end_date": df["Date"].max()},
 )
+xaxis_range_store = dcc.Store(id="xaxis-range-store", data=None)
+date_range_store = dcc.Store(
+    id="date-range-store",
+    data={"start_date": df["Date"].min(), "end_date": df["Date"].max()},
+)
 
 # Wrapping main content in cards
 tab1_layout = html.Div(
@@ -171,17 +179,22 @@ tab1_layout = html.Div(
         bollinger_state_store,
         xaxis_range_store,
         date_range_store,
+        xaxis_range_store,
+        date_range_store,
         dbc.Card(
             dbc.CardBody(
                 [
                     # Controls: Timeframe, Chart Type, and Bollinger Window
+                    # Controls: Timeframe, Chart Type, and Bollinger Window
                     html.Div(
                         [
+                            # Timeframe Selector
                             # Timeframe Selector
                             html.Div(
                                 [
                                     html.H5(
                                         "Select Timeframe",
+                                        style={"marginBottom": "10px"},
                                         style={"marginBottom": "10px"},
                                     ),
                                     dcc.DatePickerRange(
@@ -190,6 +203,8 @@ tab1_layout = html.Div(
                                         max_date_allowed=df["Date"].max(),
                                         start_date=df["Date"].min(),
                                         end_date=df["Date"].max(),
+                                        display_format="YYYY-MM-DD",
+                                        style={"width": "300px"},
                                         display_format="YYYY-MM-DD",
                                         style={"width": "300px"},
                                     ),
@@ -262,6 +277,7 @@ tab1_layout = html.Div(
                             "display": "flex",
                             "alignItems": "center",
                             "justifyContent": "space-between",
+                            "justifyContent": "space-between",
                             "marginBottom": "20px",
                         },
                     ),
@@ -310,6 +326,13 @@ tab1_layout = html.Div(
                                             for _, row in df.drop_duplicates(
                                                 "Company"
                                             ).iterrows()
+                                            {
+                                                "label": row["CompanyDisplay"],
+                                                "value": row["Company"],
+                                            }
+                                            for _, row in df.drop_duplicates(
+                                                "Company"
+                                            ).iterrows()
                                         ],
                                         value=[],
                                         multi=True,
@@ -336,6 +359,7 @@ tab1_layout = html.Div(
         ),
         footer,
     ],
+    style={"backgroundColor": theme["background"], "padding": "0px"},
     style={"backgroundColor": theme["background"], "padding": "0px"},
 )
 
@@ -372,6 +396,7 @@ def update_chart(
     bollinger_state,
     window_size,
     checkbox_ids,
+    xaxis_range,
     xaxis_range,
 ):
     print("Callback triggered!")
@@ -478,6 +503,9 @@ def update_chart(
 
     for company in selected_companies:
         company_data = filtered_df[filtered_df["Company"] == company]
+        company_display = df[df["Company"] == company]["CompanyDisplay"].iloc[0]
+
+        # Main price trace
         company_display = df[df["Company"] == company]["CompanyDisplay"].iloc[0]
 
         # Main price trace
