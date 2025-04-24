@@ -20,6 +20,14 @@ def is_data_present():
     absolute_bourso_path = os.path.abspath(HOME + 'bourso')
     absolute_euronext_path = os.path.abspath(HOME + 'euronext')
     return os.path.exists(absolute_bourso_path) and os.path.exists(absolute_euronext_path)
+
+
+def verify_db_state(db:TSDB):
+    # clear table companies, stocks and daystocks
+    print("Clearing tables")
+    db._purge_database()
+    # db._setup_database()
+
     
 # private functions
 def read_raw_bousorama(year):
@@ -156,6 +164,8 @@ def store_files(start:str, end:str, website:str, db:TSDB):
         print("Data not present")
 
         raise ValueError("Data not present")
+
+    verify_db_state(db)
 
     raw_boursorama = read_raw_bousorama(year)
     raw_boursorama = clean_raw_bousorama(raw_boursorama)
