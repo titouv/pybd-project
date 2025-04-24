@@ -25,11 +25,6 @@ body {
     transition: all 0.2s ease;
 }
 
-/* Hide the dropdown selection pill */
-.dash-dropdown .Select--multi .Select-value {
-    display: none;
-}
-
 .hide-dropdown-selection .Select-value {
     display: none !important;
 }

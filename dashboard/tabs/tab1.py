@@ -193,7 +193,7 @@ tab1_layout = html.Div(
                                         max_date_allowed=df["Date"].max(),
                                         start_date=df["Date"].min(),
                                         end_date=df["Date"].max(),
-                                        display_format="YYYY-MM-DD",
+                                        display_format="DD/MM/YYYY",
                                         style={"width": "300px"},
                                     ),
                                 ],
