@@ -4,7 +4,7 @@ networks:
 
 services:
   db:
-    image: reg.undercloud.cri.epita.fr/docker/timescale/timescaledb/timescale/timescaledb:latest-pg16
+    image: timescale/timescaledb:latest-pg16
     container_name: db
     command: postgres -c shared_preload_libraries=timescaledb
       #command:["sh", "-c", "chmod -R 777 /var/lib/postgresql/data/timescaledb &&  postgres -c shared_preload_libraries=timescaledb"]
