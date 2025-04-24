@@ -5,11 +5,16 @@ import glob
 import time
 import re
 import timescaledb_model as tsdb
+from timescaledb_model import initial_markets_data
 import dateutil
+import mylogging  # Import the logging library
 
 TSDB = tsdb.TimescaleStockMarketModel
 HOME = "/home/bourse/data/"   # we expect subdirectories boursorama and euronext
 HOME="./data/" # for local testing
+
+# Instantiate logger
+logger = mylogging.getLogger(__name__, filename="/tmp/etl.log")
 
 #=================================================
 # Extract, Transform and Load data in the database
@@ -24,7 +29,7 @@ def is_data_present():
 
 def verify_db_state(db:TSDB):
     # clear table companies, stocks and daystocks
-    print("Clearing tables")
+    logger.info("Clearing database tables: companies, stocks, daystocks")
     db._purge_database()
     # db._setup_database()
 
@@ -158,33 +163,44 @@ def timer_decorator(func):
 
 @timer_decorator
 def store_files(start:str, end:str, website:str, db:TSDB):
+    logger.info(f"Starting ETL process for {website} data from {start} to {end}")
     year = '2021' # TODO make it dynamic
 
     if not is_data_present():
-        print("Data not present")
-
+        logger.error("Data not present")
         raise ValueError("Data not present")
 
     verify_db_state(db)
 
+    logger.info(f"Reading raw Boursorama data for year {year}")
     raw_boursorama = read_raw_bousorama(year)
+    logger.info(f"Cleaning raw Boursorama data ({len(raw_boursorama)} rows)")
     raw_boursorama = clean_raw_bousorama(raw_boursorama)
+    logger.info("Extracting unique companies from Boursorama data")
     companies_bousorama = make_subset_of_companies_bousorama(raw_boursorama)
+    logger.info(f"Adding market information to Boursorama companies ({len(companies_bousorama)} rows)")
     companies_bousorama = add_market_column_boursorama(companies_bousorama)
+    logger.info("Normalizing Boursorama companies dataframe")
     companies_bousorama = make_normalized_dataframe_boursorama(companies_bousorama)
 
-
+    logger.info(f"Reading raw Euronext data for year {year}")
     raw_euronext = read_raw_euronext(year)
+    logger.info(f"Cleaning raw Euronext data ({len(raw_euronext)} rows)")
     raw_euronext = clean_raw_euronext(raw_euronext)
+    logger.info("Extracting unique companies from Euronext data")
     companies_euronext = make_subset_of_companies_euronext(raw_euronext)
+    logger.info(f"Adding market information to Euronext companies ({len(companies_euronext)} rows)")
     companies_euronext = add_market_column_euronext(companies_euronext)
+    logger.info("Normalizing Euronext companies dataframe")
     companies_euronext = make_normalized_dataframe_euronext(companies_euronext)
 
+    logger.info("Merging Boursorama and Euronext company data")
     merged_companies = pd.merge(companies_euronext, companies_bousorama, 
                             left_on=['symbol', 'name', 'market'], 
                             right_on=['symbol', 'name', 'market'], 
                             how='outer')
     print(merged_companies.head())
+    logger.info(f"Merged companies dataframe created ({len(merged_companies)} rows)")
     
     companies_db_dataframe = pd.DataFrame(
         columns=[
@@ -194,18 +210,6 @@ def store_files(start:str, end:str, website:str, db:TSDB):
         ],
     )
 
-    initial_markets_data = (
-        (1, "New York", "nyse", "", "NYSE", ""),
-        (2, "London Stock Exchange", "lse", "1u*.L", "LSE", ""),
-        (3, "Bourse de Milan", "milano", "1g", "", ""),
-        (4, "Mercados Espanoles", "mercados", "FF55-", "", ""),
-        (5, "Amsterdam", "amsterdam", "1rA", "", "Amsterdam"),
-        (6, "Paris", "paris", "1rP", "ENXTPA", "Paris"),
-        (7, "Deutsche Borse", "xetra", "1z", "", ""),
-        (8, "Bruxelle", "bruxelle", "FF11_", "", "Brussels"),
-        (9, "Australie", "asx", "", "ASX", ""),
-        (100, "International", "int", "", "", ""),  # should be last one
-    )
     # generate id
     companies_db_dataframe['id'] = merged_companies.index
     companies_db_dataframe['name'] = merged_companies['name']
@@ -223,8 +227,9 @@ def store_files(start:str, end:str, website:str, db:TSDB):
 
     print(companies_db_dataframe.head())
 
+    logger.info("Writing companies data to database")
     db.df_write(companies_db_dataframe, 'companies')
-
+    logger.info(f"Stored {len(companies_db_dataframe)} companies")
 
     # add column company_id into raw_boursorama and raw_euronext
     bousorama_to_id = dict(zip(companies_db_dataframe['boursorama'], companies_db_dataframe['id']))
@@ -233,6 +238,7 @@ def store_files(start:str, end:str, website:str, db:TSDB):
     euronext_to_id = dict(zip(companies_db_dataframe['euronext'], companies_db_dataframe['id']))
     raw_euronext['company_id'] = raw_euronext['Name'].map(euronext_to_id)
     
+    logger.info("Preparing daystocks data from Euronext")
     # create daystocks for euronext
     daystocks_db_dataframe = pd.DataFrame(
         columns=[
@@ -255,8 +261,11 @@ def store_files(start:str, end:str, website:str, db:TSDB):
     # TODO compute mean and std
     
 
+    logger.info("Writing daystocks data to database")
     db.df_write(daystocks_db_dataframe, 'daystocks')
+    logger.info(f"Stored {len(daystocks_db_dataframe)} daystocks entries")
 
+    logger.info("Preparing stocks data from Boursorama")
     # create stocks for boursorama
     stocks_db_dataframe = pd.DataFrame(
         columns=[
@@ -285,9 +294,11 @@ def store_files(start:str, end:str, website:str, db:TSDB):
     stocks_db_dataframe['volume'] = raw_boursorama['volume']
     stocks_db_dataframe
 
+    logger.info("Writing stocks data to database")
     db.df_write(stocks_db_dataframe, 'stocks')
+    logger.info(f"Stored {len(stocks_db_dataframe)} stocks entries")
 
-
+    logger.info("ETL process finished successfully.")
     
     
     
