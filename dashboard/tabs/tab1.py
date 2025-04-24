@@ -349,6 +349,8 @@ tab1_layout = html.Div(
         ddep.Output("line-button", "style"),
         ddep.Output("candlestick-button", "style"),
         ddep.Output("stock-graph", "figure"),
+        ddep.Output("date-picker", "start_date"),
+        ddep.Output("date-picker", "end_date"),
     ],
     [
         ddep.Input("line-button", "n_clicks"),
@@ -356,13 +358,13 @@ tab1_layout = html.Div(
         ddep.Input("company-selector", "value"),
         ddep.Input("date-picker", "start_date"),
         ddep.Input("date-picker", "end_date"),
+        ddep.Input("stock-graph", "relayoutData"),  # <--- add this
         ddep.Input({"type": "bollinger-checkbox", "index": ALL}, "value"),
         ddep.Input("bollinger-state-store", "data"),
         ddep.Input("bollinger-window-slider", "value"),
     ],
     [
         ddep.State({"type": "bollinger-checkbox", "index": ALL}, "id"),
-        ddep.State("xaxis-range-store", "data"),
     ],
 )
 def update_chart(
@@ -371,12 +373,27 @@ def update_chart(
     selected_companies,
     start_date,
     end_date,
+    relayout_data,  # <--- add this
     bollinger_values,
     bollinger_state,
     window_size,
     checkbox_ids,
-    xaxis_range,
 ):
+    # Determine the range to use
+    if relayout_data:
+        # Handle zoom/pan/range selector
+        if "xaxis.range[0]" in relayout_data and "xaxis.range[1]" in relayout_data:
+            start_date = (
+                pd.to_datetime(relayout_data["xaxis.range[0]"]).date().isoformat()
+            )
+            end_date = (
+                pd.to_datetime(relayout_data["xaxis.range[1]"]).date().isoformat()
+            )
+        elif "xaxis.autorange" in relayout_data and relayout_data["xaxis.autorange"]:
+            # "ALL" button or double-click: reset to full range
+            start_date = df["Date"].min().date().isoformat()
+            end_date = df["Date"].max().date().isoformat()
+
     print("Callback triggered!")
     print("Selected companies:", selected_companies)
     print("Start date:", start_date)
@@ -405,13 +422,6 @@ def update_chart(
         }
         graph_title = "Candlestick Stock Chart"
 
-    # Use stored range if available and not changing date picker
-    triggered = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
-    if xaxis_range and not triggered.startswith("date-picker"):
-        display_range = xaxis_range
-    else:
-        display_range = [start_date, end_date]
-
     # Preserve the current view's time range
     if start_date is None or end_date is None:
         start_date = df["Date"].min()
@@ -437,6 +447,16 @@ def update_chart(
 
     filtered_df["Return"] = filtered_df.groupby("Company")["Close"].pct_change()
     volatility = filtered_df.groupby("Company")["Return"].std()
+
+    # After filtering the data:
+    if len(filtered_df) > 0:
+        min_date = filtered_df["Date"].min().date().isoformat()
+        max_date = filtered_df["Date"].max().date().isoformat()
+        display_range = [min_date, max_date]
+    else:
+        min_date = start_date
+        max_date = end_date
+        display_range = [start_date, end_date]  # fallback
 
     if len(filtered_df) > 0:
         print("Data range:", filtered_df["Date"].min(), "to", filtered_df["Date"].max())
@@ -515,6 +535,7 @@ def update_chart(
             company_data = calculate_bollinger_bands(
                 company_data, num_std=2, window=window_size
             )  # Use the selected window size for Bollinger Bands
+            # Add Upper Band
             fig.add_trace(
                 go.Scatter(
                     x=company_data["Date"],
@@ -526,17 +547,7 @@ def update_chart(
                     showlegend=True,
                 )
             )
-            fig.add_trace(
-                go.Scatter(
-                    x=company_data["Date"],
-                    y=company_data["Moving Average"],
-                    mode="lines",
-                    name=f"{company_display} MA",
-                    line=dict(color=color_mapping[company], width=1, dash="dash"),
-                    opacity=0.5,
-                    showlegend=True,
-                )
-            )
+            # Add Lower Band (fill to Upper Band)
             fig.add_trace(
                 go.Scatter(
                     x=company_data["Date"],
@@ -547,6 +558,18 @@ def update_chart(
                     opacity=0.3,
                     showlegend=True,
                     fill="tonexty",
+                )
+            )
+            # Add Moving Average
+            fig.add_trace(
+                go.Scatter(
+                    x=company_data["Date"],
+                    y=company_data["Moving Average"],
+                    mode="lines",
+                    name=f"{company_display} MA",
+                    line=dict(color=color_mapping[company], width=1, dash="dash"),
+                    opacity=0.5,
+                    showlegend=True,
                 )
             )
 
@@ -563,7 +586,7 @@ def update_chart(
                 thickness=0.05,
                 bgcolor="#F5F5F5",
             ),
-            range=display_range,  # Use the preserved range
+            range=display_range,  # Use the filtered range
             rangeselector=dict(
                 buttons=list(
                     [
@@ -591,7 +614,7 @@ def update_chart(
         hovermode="x unified",
     )
 
-    return line_style, candlestick_style, fig
+    return line_style, candlestick_style, fig, min_date, max_date
 
 
 # Callback to update the company table and dropdown options
@@ -932,34 +955,3 @@ def update_xaxis_range(start_date, end_date, relayout_data, current_range):
         return [relayout_data["xaxis.range[0]"], relayout_data["xaxis.range[1]"]]
     # If the date picker is used
     return [start_date, end_date]
-
-
-@app.callback(
-    [
-        ddep.Output("date-picker", "start_date"),
-        ddep.Output("date-picker", "end_date"),
-        ddep.Output("date-range-store", "data"),
-    ],
-    [
-        ddep.Input("stock-graph", "relayoutData"),
-        ddep.Input("date-picker", "start_date"),
-        ddep.Input("date-picker", "end_date"),
-    ],
-    [ddep.State("date-range-store", "data")],
-)
-def sync_date_range(relayout_data, picker_start_date, picker_end_date, current_range):
-    # If the slider or range selector is used
-    if (
-        relayout_data
-        and "xaxis.range[0]" in relayout_data
-        and "xaxis.range[1]" in relayout_data
-    ):
-        start_date = pd.to_datetime(relayout_data["xaxis.range[0]"])
-        end_date = pd.to_datetime(relayout_data["xaxis.range[1]"])
-    else:
-        # If the date picker is used
-        start_date = pd.to_datetime(picker_start_date)
-        end_date = pd.to_datetime(picker_end_date)
-
-    # Update the store with the new range
-    return start_date, end_date, {"start_date": start_date, "end_date": end_date}
