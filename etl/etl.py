@@ -11,7 +11,7 @@ import mylogging  # Import the logging library
 
 TSDB = tsdb.TimescaleStockMarketModel
 HOME = "/home/bourse/data/"   # we expect subdirectories boursorama and euronext
-HOME="./data/" # for local testing
+HOME = "./data/" # for local testing
 
 # Instantiate logger
 logger = mylogging.getLogger(__name__, filename="/tmp/etl.log")
@@ -35,11 +35,14 @@ def verify_db_state(db:TSDB):
 
     
 # private functions
-def read_raw_bousorama(year):
-    compA = pd.concat({dateutil.parser.parse(f.split('compA ')[1].split('.bz2')[0]):pd.read_pickle(f) for f in glob.glob(HOME + 'bourso/' + year + '/compA*')})
-    compB = pd.concat({dateutil.parser.parse(f.split('compB ')[1].split('.bz2')[0]):pd.read_pickle(f) for f in glob.glob(HOME + 'bourso/' + year + '/compB*')})
-    merge = pd.concat([compA, compB])
-    return merge
+def read_raw_bousorama(years:list[str]):
+    dfs = []
+    for year in years:
+        compA = pd.concat({dateutil.parser.parse(f.split('compA ')[1].split('.bz2')[0]):pd.read_pickle(f) for f in glob.glob(HOME + 'bourso/' + year + '/compA*')})
+        compB = pd.concat({dateutil.parser.parse(f.split('compB ')[1].split('.bz2')[0]):pd.read_pickle(f) for f in glob.glob(HOME + 'bourso/' + year + '/compB*')})
+        merge = pd.concat([compA, compB])
+        dfs.append(merge)
+    return pd.concat(dfs)
 
 def clean_raw_bousorama(df):
     return df
@@ -87,7 +90,7 @@ def make_normalized_dataframe_boursorama(df):
 
 
 
-def read_raw_euronext(year):
+def read_raw_euronext(years:list[str]):
     # raw columns name are
     # Name,ISIN,Symbol,	Market,	Trading, Currency, Open, High, Low, Last, Last Date/Time, Time Zone, Volume, Turnover
     def read_euronext_file(path):
@@ -95,9 +98,12 @@ def read_raw_euronext(year):
             return pd.read_csv(path, delimiter='\t')
         return pd.read_excel(path)
 
-    files = glob.glob(HOME + 'euronext/*' + year + '*')
-    df =  pd.concat([read_euronext_file(f) for f in files])
-    return df
+    dfs = []
+    for year in years:
+        files = glob.glob(HOME + 'euronext/*' + year + '*')
+        df =  pd.concat([read_euronext_file(f) for f in files])
+        dfs.append(df)
+    return pd.concat(dfs)
 
 def clean_raw_euronext(df):
     df = df.iloc[3:]
@@ -127,6 +133,8 @@ def add_market_column_euronext(df):
         "Euronext Brussels, Paris":"Paris",
         "Euronext Growth Paris, Brussels":"Paris",
         "Euronext Paris, Amsterdam, Brussels":"Paris",
+        "Euronext Growth Brussels, Paris":"Paris",
+        "Euronext Brussels, Amsterdam, Paris":"Paris",
         "Euronext Growth Dublin":"Dublin",
         "Euronext Dublin":"Dublin",
     }
@@ -162,9 +170,8 @@ def timer_decorator(func):
 # 
 
 @timer_decorator
-def store_files(start:str, end:str, website:str, db:TSDB):
-    logger.info(f"Starting ETL process for {website} data from {start} to {end}")
-    year = '2021' # TODO make it dynamic
+def store_files(years:list[str], db:TSDB):
+    logger.info(f"Starting ETL process for years {years}")
 
     if not is_data_present():
         logger.error("Data not present")
@@ -172,8 +179,8 @@ def store_files(start:str, end:str, website:str, db:TSDB):
 
     verify_db_state(db)
 
-    logger.info(f"Reading raw Boursorama data for year {year}")
-    raw_boursorama = read_raw_bousorama(year)
+    logger.info(f"Reading raw Boursorama data for years {years}")
+    raw_boursorama = read_raw_bousorama(years)
     logger.info(f"Cleaning raw Boursorama data ({len(raw_boursorama)} rows)")
     raw_boursorama = clean_raw_bousorama(raw_boursorama)
     logger.info("Extracting unique companies from Boursorama data")
@@ -183,8 +190,8 @@ def store_files(start:str, end:str, website:str, db:TSDB):
     logger.info("Normalizing Boursorama companies dataframe")
     companies_bousorama = make_normalized_dataframe_boursorama(companies_bousorama)
 
-    logger.info(f"Reading raw Euronext data for year {year}")
-    raw_euronext = read_raw_euronext(year)
+    logger.info(f"Reading raw Euronext data for years {years}")
+    raw_euronext = read_raw_euronext(years)
     logger.info(f"Cleaning raw Euronext data ({len(raw_euronext)} rows)")
     raw_euronext = clean_raw_euronext(raw_euronext)
     logger.info("Extracting unique companies from Euronext data")
@@ -313,5 +320,6 @@ if __name__ == '__main__':
     pd.set_option('display.max_columns', None)  # usefull for dedugging
     # db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'db', 'monmdp')        # inside docker
     db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'localhost', 'monmdp') # outside docker
-    store_files("2020-01-01", "2020-02-01", "euronext", db) # one month to test
+    years = ["2021", "2022", "2023", "2024"]
+    store_files(years, db)
     print("Done Extract Transform and Load")
