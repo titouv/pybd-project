@@ -2,3 +2,5 @@ __pycache__
 reading/bourso
 reading/euronext
 notebook_ps3_en
+*.tgz
+data/

@@ -9,15 +9,22 @@ import dateutil
 
 TSDB = tsdb.TimescaleStockMarketModel
 HOME = "/home/bourse/data/"   # we expect subdirectories boursorama and euronext
+HOME="./data/" # for local testing
 
 #=================================================
 # Extract, Transform and Load data in the database
 #=================================================
-#
+
+def is_data_present():
+    import os
+    absolute_bourso_path = os.path.abspath(HOME + 'bourso')
+    absolute_euronext_path = os.path.abspath(HOME + 'euronext')
+    return os.path.exists(absolute_bourso_path) and os.path.exists(absolute_euronext_path)
+    
 # private functions
 def read_raw_bousorama(year):
-    compA = pd.concat({dateutil.parser.parse(f.split('compA ')[1].split('.bz2')[0]):pd.read_pickle(f) for f in glob.glob('/Users/titouanverhille/Developer/pybd-project/reading/bourso/' + year + '/compA*')})
-    compB = pd.concat({dateutil.parser.parse(f.split('compB ')[1].split('.bz2')[0]):pd.read_pickle(f) for f in glob.glob('/Users/titouanverhille/Developer/pybd-project/reading/bourso/' + year + '/compB*')})
+    compA = pd.concat({dateutil.parser.parse(f.split('compA ')[1].split('.bz2')[0]):pd.read_pickle(f) for f in glob.glob(HOME + 'bourso/' + year + '/compA*')})
+    compB = pd.concat({dateutil.parser.parse(f.split('compB ')[1].split('.bz2')[0]):pd.read_pickle(f) for f in glob.glob(HOME + 'bourso/' + year + '/compB*')})
     merge = pd.concat([compA, compB])
     return merge
 
@@ -75,7 +82,7 @@ def read_raw_euronext(year):
             return pd.read_csv(path, delimiter='\t')
         return pd.read_excel(path)
 
-    files = glob.glob('/Users/titouanverhille/Developer/pybd-project/reading/euronext/*' + year + '*')
+    files = glob.glob(HOME + 'euronext/*' + year + '*')
     df =  pd.concat([read_euronext_file(f) for f in files])
     return df
 
@@ -144,6 +151,11 @@ def timer_decorator(func):
 @timer_decorator
 def store_files(start:str, end:str, website:str, db:TSDB):
     year = '2021' # TODO make it dynamic
+
+    if not is_data_present():
+        print("Data not present")
+
+        raise ValueError("Data not present")
 
     raw_boursorama = read_raw_bousorama(year)
     raw_boursorama = clean_raw_bousorama(raw_boursorama)
