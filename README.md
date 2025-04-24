@@ -1,6 +1,14 @@
 # PyBD Project
 
-This project involves 
+This project involves analyzing 5 years of financial data from the Paris Stock Exchange. The data comes from two sources: Euronext (daily data) and Boursorama (10-minute intervals). The goal is to:
+
+1. Read, clean and store the data efficiently in a TimescaleDB database
+2. Create a dashboard using Dash to visualize and analyze the data, including:
+   - Display stock prices on logarithmic scale (line or candlestick charts)
+   - Compare multiple stocks with different colors
+   - Show Bollinger Bands indicators
+   - Display data tables with daily statistics (min, max, open, close, mean, std)
+   - Additional custom analysis features
 
 ## Download dataset
 
