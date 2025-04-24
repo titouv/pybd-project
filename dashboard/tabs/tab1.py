@@ -559,7 +559,7 @@ def update_chart(
         margin={"l": 20, "r": 20, "t": 40, "b": 20},
         xaxis=dict(
             rangeslider=dict(
-                visible=True,
+                visible=False,
                 thickness=0.05,
                 bgcolor="#F5F5F5",
             ),
