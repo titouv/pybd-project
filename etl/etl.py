@@ -135,6 +135,7 @@ def add_market_column_euronext(df):
         "Euronext Paris, Amsterdam, Brussels":"Paris",
         "Euronext Growth Brussels, Paris":"Paris",
         "Euronext Brussels, Amsterdam, Paris":"Paris",
+        "Euronext Paris, London":"Paris",
         "Euronext Growth Dublin":"Dublin",
         "Euronext Dublin":"Dublin",
     }
@@ -320,6 +321,6 @@ if __name__ == '__main__':
     pd.set_option('display.max_columns', None)  # usefull for dedugging
     # db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'db', 'monmdp')        # inside docker
     db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'localhost', 'monmdp') # outside docker
-    years = ["2021", "2022", "2023", "2024"]
+    years = ["2020", "2021", "2022", "2023", "2024"]
     store_files(years, db)
     print("Done Extract Transform and Load")
