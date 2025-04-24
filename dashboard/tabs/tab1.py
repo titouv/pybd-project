@@ -32,7 +32,7 @@ def get_stock_data():
         SELECT 
             c.id as cid, 
             c.name as company, 
-            c.symbol as symbol,  -- Add this line
+            c.symbol as symbol,
             ds.date as date,
             ds.open as open, 
             ds.close as close, 
@@ -605,6 +605,7 @@ def update_chart(
             type="date",  # Ensure proper date handling
             calendar="gregorian",
         ),
+        yaxis_type="log",
         hoverlabel=dict(
             bgcolor="white",
             font_size=14,
