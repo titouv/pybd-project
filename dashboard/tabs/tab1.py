@@ -91,17 +91,28 @@ df["CompanyDisplay"] = df["Company"] + " (" + df["Symbol"] + ")"
 df = df.sort_values(["Company", "Date"])
 df["Return"] = df.groupby("Company")["Close"].pct_change()
 
+# Predefined list of distinct colors
+PREDEFINED_COLORS = [
+    "#1f77b4",  # Muted blue
+    "#ff7f0e",  # Safety orange
+    "#2ca02c",  # Cooked asparagus green
+    "#d62728",  # Brick red
+    "#9467bd",  # Muted purple
+    "#8c564b",  # Chestnut brown
+    "#e377c2",  # Raspberry yogurt pink
+    "#7f7f7f",  # Middle gray
+    "#bcbd22",  # Curry yellow-green
+    "#17becf",  # Blue-teal
+]
 
-# Generate random colors for companies
+
+# Generate color mapping from predefined list
 def generate_color_mapping(companies):
-    random.seed(69)  # Set seed for reproducibility
-    colors = []
-    for _ in companies:  # low ranges for darker colors
-        r = random.randint(10, 100)
-        g = random.randint(100, 100)
-        b = random.randint(10, 100)
-        colors.append(f"#{r:02x}{g:02x}{b:02x}")
-    return dict(zip(companies, colors))
+    color_map = {}
+    unique_companies = sorted(list(companies))
+    for i, company in enumerate(unique_companies):
+        color_map[company] = PREDEFINED_COLORS[i % len(PREDEFINED_COLORS)]
+    return color_map
 
 
 # Function to generate complementary colors
