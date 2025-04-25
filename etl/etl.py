@@ -37,13 +37,18 @@ def verify_db_state(db:TSDB):
     
 # private functions
 def read_raw_bousorama(years:list[str]):
-    dfs = []
+    all_compA_files = []
+    all_compB_files = []
     for year in years:
-        compA = pd.concat({dateutil.parser.parse(f.split('compA ')[1].split('.bz2')[0]):pd.read_pickle(f) for f in glob.glob(HOME + 'bourso/' + year + '/compA*')})
-        compB = pd.concat({dateutil.parser.parse(f.split('compB ')[1].split('.bz2')[0]):pd.read_pickle(f) for f in glob.glob(HOME + 'bourso/' + year + '/compB*')})
-        merge = pd.concat([compA, compB])
-        dfs.append(merge)
-    return pd.concat(dfs)
+        compA_files = glob.glob(HOME + 'bourso/' + year + '/compA*')
+        compB_files = glob.glob(HOME + 'bourso/' + year + '/compB*')
+        all_compA_files.extend(compA_files)
+        all_compB_files.extend(compB_files)
+
+    compA = pd.concat({dateutil.parser.parse(f.split('compA ')[1].split('.bz2')[0]):pd.read_pickle(f) for f in all_compA_files})
+    compB = pd.concat({dateutil.parser.parse(f.split('compB ')[1].split('.bz2')[0]):pd.read_pickle(f) for f in all_compB_files})
+    merge = pd.concat([compA, compB])
+    return merge
 
 def clean_raw_bousorama(df):
     return df
