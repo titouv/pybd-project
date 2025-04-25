@@ -49,6 +49,7 @@ def get_stock_data():
     companies["date"] = pd.to_datetime(companies["date"], utc=True)
     companies = companies.rename(
         columns={
+            "cid": "Cid",
             "company": "Company",
             "symbol": "Symbol",
             "date": "Date",
@@ -107,11 +108,11 @@ PREDEFINED_COLORS = [
 
 
 # Generate color mapping from predefined list
-def generate_color_mapping(companies):
+def generate_color_mapping(cids):
     color_map = {}
-    unique_companies = sorted(list(companies))
-    for i, company in enumerate(unique_companies):
-        color_map[company] = PREDEFINED_COLORS[i % len(PREDEFINED_COLORS)]
+    unique_cids = sorted(list(cids))
+    for i, cid in enumerate(unique_cids):
+        color_map[cid] = PREDEFINED_COLORS[i % len(PREDEFINED_COLORS)]
     return color_map
 
 
@@ -152,7 +153,7 @@ def calculate_bollinger_bands(df, num_std=2, window=20):
 
 
 # Dynamically generate color mapping
-color_mapping = generate_color_mapping(df["Company"].unique())
+color_mapping = generate_color_mapping(df["Cid"].unique())
 
 # Footer for the layout
 footer = html.Footer(
@@ -319,10 +320,10 @@ tab1_layout = html.Div(
                                         options=[
                                             {
                                                 "label": row["CompanyDisplay"],
-                                                "value": row["Company"],
+                                                "value": row["Cid"],
                                             }
                                             for _, row in df.drop_duplicates(
-                                                "Company"
+                                                "Cid"
                                             ).iterrows()
                                         ],
                                         value=[],
@@ -448,16 +449,16 @@ def update_chart(
     # Filter data based on selected companies and timeframe
     filtered_df = (
         df[
-            (df["Company"].isin(selected_companies))
+            (df["Cid"].isin(selected_companies))
             & (df["Date"] >= start_date)
             & (df["Date"] <= end_date)
         ]
-        .sort_values(["Company", "Date"])
+        .sort_values(["Cid", "Date"])
         .copy()
     )
 
-    filtered_df["Return"] = filtered_df.groupby("Company")["Close"].pct_change()
-    volatility = filtered_df.groupby("Company")["Return"].std()
+    filtered_df["Return"] = filtered_df.groupby("Cid")["Close"].pct_change()
+    volatility = filtered_df.groupby("Cid")["Return"].std()
 
     # After filtering the data:
     if len(filtered_df) > 0:
@@ -473,15 +474,15 @@ def update_chart(
         print("Data range:", filtered_df["Date"].min(), "to", filtered_df["Date"].max())
         print(
             "Sample data for first company:",
-            filtered_df[filtered_df["Company"] == selected_companies[0]].head(),
+            filtered_df[filtered_df["Cid"] == selected_companies[0]].head(),
         )
     else:
         print("No data in filtered_df")
 
-    # Print volatility for each selected company (log on every chart update)
-    for company in selected_companies:
-        vol = volatility.get(company, None)
-        print(f"[Chart] Volatility for {company}: {vol}")
+    # Print volatility for each selected company
+    for cid in selected_companies:
+        vol = volatility.get(cid, None)
+        print(f"[Chart] Volatility for company ID {cid}: {vol}")
 
     # Combine checkbox values and stored state
     companies_with_bollinger = []
@@ -489,30 +490,30 @@ def update_chart(
     # Add companies from checkbox values
     if checkbox_ids and bollinger_values:
         for i, checkbox_id in enumerate(checkbox_ids):
-            company = checkbox_id["index"]
+            cid_str = checkbox_id["index"]
             if (
                 i < len(bollinger_values)
                 and bollinger_values[i]
-                and company in selected_companies
+                and int(cid_str) in selected_companies
             ):
-                companies_with_bollinger.append(company)
+                companies_with_bollinger.append(int(cid_str))
 
     # Add companies from stored state for any that might be missing from checkbox values
     # (this handles situations where the checkbox might not be rendered yet)
-    for company in selected_companies:
+    for cid in selected_companies:
         if (
             bollinger_state
-            and company in bollinger_state
-            and company not in companies_with_bollinger
+            and str(cid) in bollinger_state
+            and cid not in companies_with_bollinger
         ):
-            companies_with_bollinger.append(company)
+            companies_with_bollinger.append(cid)
 
     # Generate the appropriate chart
     fig = go.Figure()
 
-    for company in selected_companies:
-        company_data = filtered_df[filtered_df["Company"] == company]
-        company_display = df[df["Company"] == company]["CompanyDisplay"].iloc[0]
+    for cid in selected_companies:
+        company_data = filtered_df[filtered_df["Cid"] == cid]
+        company_display = df[df["Cid"] == cid]["CompanyDisplay"].iloc[0]
 
         # Main price trace
         if chart_type == "line":
@@ -522,7 +523,7 @@ def update_chart(
                     y=company_data["Close"],
                     mode="lines",
                     name=company_display,  # Only the display name
-                    line=dict(color=color_mapping[company]),
+                    line=dict(color=color_mapping[cid]),
                 )
             )
         elif chart_type == "candlestick":
@@ -534,18 +535,18 @@ def update_chart(
                     low=company_data["Low"],
                     close=company_data["Close"],
                     name=company_display,
-                    increasing_line_color=color_mapping[company],
+                    increasing_line_color=color_mapping[cid],
                     decreasing_line_color=generate_complementary_color(
-                        color_mapping[company], increase=False
+                        color_mapping[cid], increase=False
                     ),
                 )
             )
 
         # Bollinger Bands
-        if company in companies_with_bollinger:
+        if cid in companies_with_bollinger:
             company_data = calculate_bollinger_bands(
                 company_data, num_std=2, window=window_size
-            )  # Use the selected window size for Bollinger Bands
+            )
             # Add Upper Band
             fig.add_trace(
                 go.Scatter(
@@ -553,7 +554,7 @@ def update_chart(
                     y=company_data["Upper Band"],
                     mode="lines",
                     name=f"{company_display} Upper Band",
-                    line=dict(color=color_mapping[company], width=1, dash="dot"),
+                    line=dict(color=color_mapping[cid], width=1, dash="dot"),
                     opacity=0.7,
                     showlegend=True,
                 )
@@ -565,7 +566,7 @@ def update_chart(
                     y=company_data["Lower Band"],
                     mode="lines",
                     name=f"{company_display} Lower Band",
-                    line=dict(color=color_mapping[company], width=1, dash="dot"),
+                    line=dict(color=color_mapping[cid], width=1, dash="dot"),
                     opacity=0.3,
                     showlegend=True,
                     fill="tonexty",
@@ -578,7 +579,7 @@ def update_chart(
                     y=company_data["Moving Average"],
                     mode="lines",
                     name=f"{company_display} MA",
-                    line=dict(color=color_mapping[company], width=1, dash="dash"),
+                    line=dict(color=color_mapping[cid], width=1, dash="dash"),
                     opacity=0.5,
                     showlegend=True,
                 )
@@ -686,43 +687,42 @@ def update_company_table(
             isinstance(triggered_dict, dict)
             and triggered_dict.get("type") == "delete-button"
         ):
-            company_to_remove = triggered_dict.get("index")
-            print("Company to Remove:", company_to_remove)
+            cid_to_remove = triggered_dict.get("index")
+            print("Company to Remove:", cid_to_remove)
             print("Selected Companies Before Removal:", selected_companies)
 
-            # Normalize company names for comparison
-            selected_companies = [
-                company.strip() for company in selected_companies
-            ]  # Remove extra spaces
-            if company_to_remove:
-                company_to_remove = company_to_remove.strip()
-
-                if company_to_remove in selected_companies:
-                    selected_companies.remove(company_to_remove)
-                    print("Selected Companies After Removal:", selected_companies)
+            if cid_to_remove:
+                # Convert cid_to_remove to integer since it comes as string from the button
+                try:
+                    cid_to_remove = int(cid_to_remove)
+                    if cid_to_remove in selected_companies:
+                        selected_companies.remove(cid_to_remove)
+                        print("Selected Companies After Removal:", selected_companies)
+                except ValueError:
+                    print(f"Error converting cid_to_remove {cid_to_remove} to integer")
 
     # Filter df for the current timeframe
     filtered_df = (
         df[
-            (df["Company"].isin(selected_companies))
+            (df["Cid"].isin(selected_companies))
             & (df["Date"] >= start_date)
             & (df["Date"] <= end_date)
         ]
-        .sort_values(["Company", "Date"])
+        .sort_values(["Cid", "Date"])
         .copy()
     )
 
-    filtered_df["Return"] = filtered_df.groupby("Company")["Close"].pct_change()
-    volatility = filtered_df.groupby("Company")["Return"].std()
+    filtered_df["Return"] = filtered_df.groupby("Cid")["Close"].pct_change()
+    volatility = filtered_df.groupby("Cid")["Return"].std()
 
     # Print volatility for each selected company
-    for company in selected_companies:
-        vol = volatility.get(company, None)
-        print(f"Volatility for {company}: {vol}")
+    for cid in selected_companies:
+        vol = volatility.get(cid, None)
+        print(f"Volatility for company ID {cid}: {vol}")
 
     stability_mapping = {
-        company: risk_level_from_vol(volatility.get(company, None))
-        for company in selected_companies
+        cid: risk_level_from_vol(volatility.get(cid, None))
+        for cid in selected_companies
     }
 
     print("Updated stability mapping:", stability_mapping)
@@ -731,9 +731,9 @@ def update_company_table(
     all_options = [
         {
             "label": row["CompanyDisplay"],
-            "value": row["Company"],
+            "value": row["Cid"],
         }
-        for _, row in df.drop_duplicates("Company").iterrows()
+        for _, row in df.drop_duplicates("Cid").iterrows()
     ]
 
     # Generate the company table
@@ -795,17 +795,22 @@ def update_company_table(
         )
 
         table_rows = []
-        for i, company in enumerate(selected_companies):
+        for i, cid in enumerate(selected_companies):
             # Alternate row background colors for better readability
             row_bg_color = "#f9f9f9" if i % 2 == 0 else "white"
 
             # Get stability info
-            stability = stability_mapping.get(company, StabilityLevel.STABLE)
+            stability = stability_mapping.get(cid, StabilityLevel.STABLE)
 
             # Check if this company has Bollinger Bands enabled in the stored state
-            is_bollinger_enabled = bollinger_state.get(company, False)
+            is_bollinger_enabled = bollinger_state.get(str(cid), False)
 
-            name = df[df["Company"] == company]["CompanyDisplay"].iloc[0]
+            # Get company display name using Cid
+            company_data = df[df["Cid"] == cid]
+            if not company_data.empty:
+                name = company_data.iloc[0]["CompanyDisplay"]
+            else:
+                name = f"Unknown Company ({cid})"
 
             table_rows.append(
                 html.Div(
@@ -846,10 +851,10 @@ def update_company_table(
                         html.Div(
                             dcc.Checklist(
                                 options=[{"label": "", "value": "bollinger"}],
-                                id={"type": "bollinger-checkbox", "index": company},
+                                id={"type": "bollinger-checkbox", "index": str(cid)},
                                 value=(
                                     ["bollinger"] if is_bollinger_enabled else []
-                                ),  # Set from stored state
+                                ),
                                 className="bollinger-checkbox",
                                 style={"marginLeft": "10px", "transform": "scale(1.2)"},
                             ),
@@ -865,7 +870,7 @@ def update_company_table(
                         html.Div(
                             dbc.Button(
                                 "✖",
-                                id={"type": "delete-button", "index": company},
+                                id={"type": "delete-button", "index": str(cid)},
                                 color="danger",
                                 size="sm",
                                 style={
@@ -937,13 +942,13 @@ def update_bollinger_state(checkbox_values, checkbox_ids, current_state):
 
     # Update state with new checkbox values
     for i, checkbox_id in enumerate(checkbox_ids):
-        company = checkbox_id["index"]
-        value = checkbox_values[i]
+        cid_str = checkbox_id["index"]
+        value = checkbox_values[i] if i < len(checkbox_values) else []
         if value:
-            current_state[company] = True
+            current_state[cid_str] = True
         else:
             # Only remove from state if it exists
-            current_state.pop(company, None)
+            current_state.pop(cid_str, None)
 
     return current_state
 

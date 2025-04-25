@@ -31,6 +31,7 @@ def get_stock_data():
     companies["date"] = pd.to_datetime(companies["date"], utc=True)
     companies = companies.rename(
         columns={
+            "cid": "Cid",
             "company": "Company",
             "symbol": "Symbol",
             "date": "Date",
@@ -73,9 +74,9 @@ tab2_layout = html.Div(
                                         options=[
                                             {
                                                 "label": f"{row['Company']} ({row['Symbol']})",
-                                                "value": row["Company"],
+                                                "value": row["Cid"],
                                             }
-                                            for _, row in df.drop_duplicates("Company")
+                                            for _, row in df.drop_duplicates("Cid")
                                             .sort_values("Company")
                                             .iterrows()
                                         ],
@@ -236,7 +237,7 @@ def update_tab2_table(
         )
 
     filtered = df[
-        (df["Company"].isin(selected_companies))
+        (df["Cid"].isin(selected_companies))
         & (df["Date"] >= start_date)
         & (df["Date"] <= end_date)
     ].copy()
@@ -257,7 +258,7 @@ def update_tab2_table(
 
     # Group by Date and Company, aggregate
     grouped = (
-        filtered.groupby(["Date", "Company"])
+        filtered.groupby(["Date", "Cid", "Company"])
         .agg(
             Min=("Low", "min"),
             Max=("High", "max"),
