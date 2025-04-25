@@ -299,7 +299,61 @@ def store_files(years:list[str], db:TSDB):
     #remove line where date is nan
     daystocks_db_dataframe = daystocks_db_dataframe[daystocks_db_dataframe['date'].notna()]
     # TODO compute mean and std
+
+    # compute and insert daystocks for boursorama
+    logger.info("Aggregating Boursorama data for daily stats")
     
+    # Ensure 'date' is the index for efficient resampling and sorting
+    # Make a copy to avoid modifying the original raw_boursorama needed for stocks
+    raw_boursorama_agg = raw_boursorama.copy()
+    # Reset index to bring 'level_0' (date) into columns, keeping the inner index
+    raw_boursorama_agg.reset_index(level=0, inplace=True) 
+    # Rename 'level_0' to 'date'
+    raw_boursorama_agg.rename(columns={'level_0': 'date'}, inplace=True) 
+    # Ensure the new 'date' column is datetime type
+    raw_boursorama_agg['date'] = pd.to_datetime(raw_boursorama_agg['date']) 
+    # Now set the 'date' column as the index
+    raw_boursorama_agg = raw_boursorama_agg.set_index('date').sort_index() 
+
+    def get_clean_last_boursorama(df):
+        """last is of object type and sometimes ends with (c) or (s)"""
+        return [
+            float(re.split("\\(.\\)$", str(x))[0].replace(" ", "").replace(",", "."))
+            for x in df["last"]
+        ]
+
+    # Clean the 'last' column *before* aggregation
+    raw_boursorama_agg['value'] = get_clean_last_boursorama(raw_boursorama_agg)
+
+    # Aggregate daily data
+    daystocks_boursorama = raw_boursorama_agg.groupby('company_id').resample('D').agg(
+        open=('value', 'first'),
+        high=('value', 'max'),
+        low=('value', 'min'),
+        close=('value', 'last'),
+        volume=('volume', 'sum')
+    ).reset_index() # Reset index to get 'company_id' and 'date' back as columns
+
+    # Rename columns to match daystocks_db_dataframe
+    daystocks_boursorama.rename(columns={'company_id': 'cid'}, inplace=True)
+    
+    # Keep only relevant columns and ensure correct order
+    daystocks_boursorama = daystocks_boursorama[['date', 'cid', 'open', 'close', 'high', 'low', 'volume']]
+    
+    # Remove rows with NaN values resulting from aggregation (e.g., days with no trades)
+    daystocks_boursorama.dropna(subset=['open', 'close', 'high', 'low', 'volume'], how='all', inplace=True)
+    
+    logger.info(f"Aggregated {len(daystocks_boursorama)} daily entries from Boursorama")
+
+    # Combine Euronext and Boursorama daystocks
+    logger.info("Combining Euronext and Boursorama daystocks data")
+    logger.info("Fusionning %d daystocks from Euronext and %d daystocks from Boursorama for a total of %d daystocks", len(daystocks_db_dataframe), len(daystocks_boursorama), len(daystocks_db_dataframe) + len(daystocks_boursorama))
+    daystocks_db_dataframe = pd.concat([daystocks_db_dataframe, daystocks_boursorama], ignore_index=True)
+    daystocks_db_dataframe['date'] = pd.to_datetime(daystocks_db_dataframe['date'])
+    # Drop duplicates, keeping the first occurrence (e.g., if Euronext has data for the same day)
+    daystocks_db_dataframe.drop_duplicates(subset=['date', 'cid'], keep='first', inplace=True)
+    daystocks_db_dataframe.sort_values(by=['date', 'cid'], inplace=True)
+
 
     logger.info("Writing daystocks data to database")
     batch_df_write(daystocks_db_dataframe, 'daystocks', db)
@@ -322,12 +376,6 @@ def store_files(years:list[str], db:TSDB):
 
     stocks_db_dataframe['date'] =  raw_boursorama['date']
 
-    def get_clean_last_boursorama(df):
-        """last is of object type and sometimes ends with (c) or (s)"""
-        return [
-            float(re.split("\\(.\\)$", str(x))[0].replace(" ", "").replace(",", "."))
-            for x in df["last"]
-        ]
 
     stocks_db_dataframe['cid'] = raw_boursorama['company_id']
     stocks_db_dataframe['value'] = get_clean_last_boursorama(raw_boursorama)
