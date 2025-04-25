@@ -12,6 +12,7 @@ import mylogging  # Import the logging library
 TSDB = tsdb.TimescaleStockMarketModel
 HOME = "/home/bourse/data/"   # we expect subdirectories boursorama and euronext
 HOME = "./data/" # for local testing
+BATCH_SIZE = 100_000  # Default batch size for database writes
 
 # Instantiate logger
 logger = mylogging.getLogger(__name__, filename="/tmp/etl.log")
@@ -170,6 +171,32 @@ def timer_decorator(func):
 # public functions
 # 
 
+# Add new batch write function
+def batch_df_write(df, table_name, db, batch_size=BATCH_SIZE):
+    """
+    Write dataframe to database in batches to reduce memory pressure.
+    
+    Args:
+        df: DataFrame to write
+        table_name: Target table name
+        db: Database connection
+        batch_size: Size of batches to write
+    """
+    total_rows = len(df)
+    num_batches = (total_rows + batch_size - 1) // batch_size  # Ceiling division
+    
+    logger.info(f"Writing {total_rows} rows to {table_name} in {num_batches} batches")
+    
+    for i in range(num_batches):
+        start_idx = i * batch_size
+        end_idx = min((i + 1) * batch_size, total_rows)
+        batch_df = df.iloc[start_idx:end_idx]
+        
+        logger.info(f"Writing batch {i+1}/{num_batches} ({len(batch_df)} rows) to {table_name}")
+        db.df_write(batch_df, table_name)
+        
+    logger.info(f"Completed writing {total_rows} rows to {table_name}")
+
 @timer_decorator
 def store_files(years:list[str], db:TSDB):
     logger.info(f"Starting ETL process for years {years}")
@@ -236,7 +263,7 @@ def store_files(years:list[str], db:TSDB):
     print(companies_db_dataframe.head())
 
     logger.info("Writing companies data to database")
-    db.df_write(companies_db_dataframe, 'companies')
+    batch_df_write(companies_db_dataframe, 'companies', db)
     logger.info(f"Stored {len(companies_db_dataframe)} companies")
 
     # add column company_id into raw_boursorama and raw_euronext
@@ -270,7 +297,7 @@ def store_files(years:list[str], db:TSDB):
     
 
     logger.info("Writing daystocks data to database")
-    db.df_write(daystocks_db_dataframe, 'daystocks')
+    batch_df_write(daystocks_db_dataframe, 'daystocks', db)
     logger.info(f"Stored {len(daystocks_db_dataframe)} daystocks entries")
 
     logger.info("Preparing stocks data from Boursorama")
@@ -303,7 +330,7 @@ def store_files(years:list[str], db:TSDB):
     stocks_db_dataframe
 
     logger.info("Writing stocks data to database")
-    db.df_write(stocks_db_dataframe, 'stocks')
+    batch_df_write(stocks_db_dataframe, 'stocks', db)
     logger.info(f"Stored {len(stocks_db_dataframe)} stocks entries")
 
     logger.info("ETL process finished successfully.")
