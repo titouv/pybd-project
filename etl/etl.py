@@ -340,19 +340,40 @@ def store_files(years:list[str], db:TSDB):
     # Keep only relevant columns and ensure correct order
     daystocks_boursorama = daystocks_boursorama[['date', 'cid', 'open', 'close', 'high', 'low', 'volume']]
     
+
+    print("Number of rows before dropping nan", len(daystocks_boursorama))
+    # Debug: Check for NaN values in each column
+    print("NaN counts in each column:")
+    print(daystocks_boursorama[['open', 'close', 'high', 'low', 'volume']].isna().sum())
     # Remove rows with NaN values resulting from aggregation (e.g., days with no trades)
-    daystocks_boursorama.dropna(subset=['open', 'close', 'high', 'low', 'volume'], how='all', inplace=True)
+    daystocks_boursorama.dropna(subset=['open', 'close', 'high', 'low', 'volume'], how='any', inplace=True)
+    print("Number of rows after dropping nan", len(daystocks_boursorama))
     
     logger.info(f"Aggregated {len(daystocks_boursorama)} daily entries from Boursorama")
 
     # Combine Euronext and Boursorama daystocks
     logger.info("Combining Euronext and Boursorama daystocks data")
-    logger.info("Fusionning %d daystocks from Euronext and %d daystocks from Boursorama for a total of %d daystocks", len(daystocks_db_dataframe), len(daystocks_boursorama), len(daystocks_db_dataframe) + len(daystocks_boursorama))
-    daystocks_db_dataframe = pd.concat([daystocks_db_dataframe, daystocks_boursorama], ignore_index=True)
+
+    # Identify companies already present in Euronext data (daystocks_db_dataframe)
+    euronext_cids = daystocks_db_dataframe['cid'].unique()
+    logger.info(f"Found {len(euronext_cids)} unique company IDs in Euronext data.")
+
+    # Filter Boursorama data to exclude companies already in Euronext data
+    daystocks_boursorama_filtered = daystocks_boursorama[~daystocks_boursorama['cid'].isin(euronext_cids)]
+    original_boursorama_count = len(daystocks_boursorama)
+    filtered_boursorama_count = len(daystocks_boursorama_filtered)
+    excluded_boursorama_count = original_boursorama_count - filtered_boursorama_count
+    logger.info(f"Filtered Boursorama data: keeping {filtered_boursorama_count} rows (excluded {excluded_boursorama_count} rows for companies already in Euronext).")
+
+    logger.info("Concatenating %d daystocks from Euronext and %d filtered daystocks from Boursorama", len(daystocks_db_dataframe), filtered_boursorama_count)
+    # Concatenate the original Euronext data with the filtered Boursorama data
+    daystocks_db_dataframe = pd.concat([daystocks_db_dataframe, daystocks_boursorama_filtered], ignore_index=True)
     daystocks_db_dataframe['date'] = pd.to_datetime(daystocks_db_dataframe['date'])
-    # Drop duplicates, keeping the first occurrence (e.g., if Euronext has data for the same day)
-    daystocks_db_dataframe.drop_duplicates(subset=['date', 'cid'], keep='first', inplace=True)
+
+    # Sort the final dataframe
     daystocks_db_dataframe.sort_values(by=['date', 'cid'], inplace=True)
+
+    logger.info(f"Combined dataframe now contains {len(daystocks_db_dataframe)} rows.")
 
 
     logger.info("Writing daystocks data to database")
