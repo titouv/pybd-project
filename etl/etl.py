@@ -36,17 +36,11 @@ def verify_db_state(db:TSDB):
 
     
 # private functions
-def read_raw_bousorama(years:list[str]):
-    all_compA_files = []
-    all_compB_files = []
-    for year in years:
-        compA_files = glob.glob(HOME + 'bourso/' + year + '/compA*')
-        compB_files = glob.glob(HOME + 'bourso/' + year + '/compB*')
-        all_compA_files.extend(compA_files)
-        all_compB_files.extend(compB_files)
-
-    compA = pd.concat({dateutil.parser.parse(f.split('compA ')[1].split('.bz2')[0]):pd.read_pickle(f) for f in all_compA_files})
-    compB = pd.concat({dateutil.parser.parse(f.split('compB ')[1].split('.bz2')[0]):pd.read_pickle(f) for f in all_compB_files})
+def read_raw_bousorama(year:str):
+    compA_files = glob.glob(HOME + 'bourso/' + year + '/compA*')
+    compB_files = glob.glob(HOME + 'bourso/' + year + '/compB*')
+    compA = pd.concat({dateutil.parser.parse(f.split('compA ')[1].split('.bz2')[0]):pd.read_pickle(f) for f in compA_files})    
+    compB = pd.concat({dateutil.parser.parse(f.split('compB ')[1].split('.bz2')[0]):pd.read_pickle(f) for f in compB_files})
     merge = pd.concat([compA, compB])
     return merge
 
@@ -96,20 +90,25 @@ def make_normalized_dataframe_boursorama(df):
 
 
 
-def read_raw_euronext(years:list[str]):
+def read_raw_euronext(year:str):
     # raw columns name are
-    # Name,ISIN,Symbol,	Market,	Trading, Currency, Open, High, Low, Last, Last Date/Time, Time Zone, Volume, Turnover
+    # When CSV: Name, ISIN, Symbol, Market, Trading, Currency, Open, High, Low, Last, Last Date/Time, Time Zone, Volume, Turnover
+    # When Excel: Name, ISIN, Symbol, Market, Currency, Open Price, High Price, low Price, last Price, last Trade MIC Time, Time Zone, Volume, Turnover, European Equities	
     def read_euronext_file(path):
         if path.endswith(".csv"):
             return pd.read_csv(path, delimiter='\t')
-        return pd.read_excel(path)
+        # when reading excel remap to csv column name
+        return pd.read_excel(path).rename(columns={
+            "Open Price":"Open",
+            "High Price":"High",
+            "low Price":"Low",
+            "last Price":"Last",
+            "last Trade MIC Time":"Last Date/Time"
+        })
 
-    dfs = []
-    for year in years:
-        files = glob.glob(HOME + 'euronext/*' + year + '*')
-        df =  pd.concat([read_euronext_file(f) for f in files])
-        dfs.append(df)
-    return pd.concat(dfs)
+    files = glob.glob(HOME + 'euronext/*' + year + '*')
+    df =  pd.concat([read_euronext_file(f) for f in files])
+    return df
 
 def clean_raw_euronext(df):
     df = df.iloc[3:]
@@ -205,12 +204,11 @@ def batch_df_write(df, table_name, db, batch_size=BATCH_SIZE):
 
 def load_year(year:str, db:TSDB):
     global full_companies_db_dataframe
-    years = [year]
-    logger.info(f"Starting ETL process for years {year}")
+    logger.info(f"Starting ETL process for year {year}")
 
 
-    logger.info(f"Reading raw Boursorama data for years {years}")
-    raw_boursorama = read_raw_bousorama(years)
+    logger.info(f"Reading raw Boursorama data for year {year}")
+    raw_boursorama = read_raw_bousorama(year)
     logger.info(f"Cleaning raw Boursorama data ({len(raw_boursorama)} rows)")
     raw_boursorama = clean_raw_bousorama(raw_boursorama)
     logger.info("Extracting unique companies from Boursorama data")
@@ -220,8 +218,8 @@ def load_year(year:str, db:TSDB):
     logger.info("Normalizing Boursorama companies dataframe")
     companies_bousorama = make_normalized_dataframe_boursorama(companies_bousorama)
 
-    logger.info(f"Reading raw Euronext data for years {years}")
-    raw_euronext = read_raw_euronext(years)
+    logger.info(f"Reading raw Euronext data for year {year}")
+    raw_euronext = read_raw_euronext(year)
     logger.info(f"Cleaning raw Euronext data ({len(raw_euronext)} rows)")
     raw_euronext = clean_raw_euronext(raw_euronext)
     logger.info("Extracting unique companies from Euronext data")
@@ -342,9 +340,19 @@ def load_year(year:str, db:TSDB):
            "date", "cid", "open", "close", "high", "low", "volume", "mean", "std"
         ],
     )
-    daystocks_db_dataframe['date'] = pd.to_datetime(raw_euronext['Last Date/Time'], 
-                                                   format='%d/%m/%y %H:%M',
-                                                   errors='coerce')
+
+    def parse_date(date_str):
+        try:
+            # First try with 4-digit year format
+            return pd.to_datetime(date_str, format='%d/%m/%Y %H:%M')
+        except:
+            try:
+                # Then try with 2-digit year format
+                return pd.to_datetime(date_str, format='%d/%m/%y %H:%M')
+            except:
+                return pd.NaT
+
+    daystocks_db_dataframe['date'] = raw_euronext['Last Date/Time'].apply(parse_date)
     daystocks_db_dataframe['cid'] = raw_euronext['company_id']
     
     # Convert columns to numeric, replacing invalid values with NaN
@@ -353,9 +361,19 @@ def load_year(year:str, db:TSDB):
     daystocks_db_dataframe['high'] = pd.to_numeric(raw_euronext['High'], errors='coerce')
     daystocks_db_dataframe['low'] = pd.to_numeric(raw_euronext['Low'], errors='coerce')
     daystocks_db_dataframe['volume'] = pd.to_numeric(raw_euronext['Volume'], errors='coerce')
+    print("daystocks_db_dataframe", daystocks_db_dataframe)
     #remove line where date is nan
+    print('remove nan')
     daystocks_db_dataframe = daystocks_db_dataframe[daystocks_db_dataframe['date'].notna()]
+    # dedupe lines with the same date and cid
+    print(f"Number of rows before deduplication: {len(daystocks_db_dataframe)}")
+    daystocks_db_dataframe = daystocks_db_dataframe.drop_duplicates(subset=['date', 'cid'])
+    print(f"Number of rows after deduplication: {len(daystocks_db_dataframe)}")
+
+
     # TODO compute mean and std
+
+    print("daystocks_db_dataframe", daystocks_db_dataframe)
 
     # compute and insert daystocks for boursorama
     logger.info("Aggregating Boursorama data for daily stats")
@@ -419,6 +437,7 @@ def load_year(year:str, db:TSDB):
     # Identify companies already present in Euronext data (daystocks_db_dataframe)
     euronext_cids = daystocks_db_dataframe['cid'].unique()
     logger.info(f"Found {len(euronext_cids)} unique company IDs in Euronext data.")
+    print("daystocks_db_dataframe", daystocks_db_dataframe)
 
     # Filter Boursorama data to exclude companies already in Euronext data
     daystocks_boursorama_filtered = daystocks_boursorama[~daystocks_boursorama['cid'].isin(euronext_cids)]
