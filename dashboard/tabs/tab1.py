@@ -1,15 +1,12 @@
 import pandas as pd
 from dash import dcc, html, ALL, callback_context, dash
-from dash import dcc, html, ALL, callback_context, dash
 import dash.dependencies as ddep
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import colorsys
 from enum import Enum
 import random
-import random
 
-from app import app, db
 from app import app, db
 
 theme = {
@@ -92,28 +89,17 @@ df["CompanyDisplay"] = df["Company"] + " (" + df["Symbol"] + ")"
 df = df.sort_values(["Company", "Date"])
 df["Return"] = df.groupby("Company")["Close"].pct_change()
 
-# Predefined list of distinct colors
-PREDEFINED_COLORS = [
-    "#1f77b4",  # Muted blue
-    "#ff7f0e",  # Safety orange
-    "#2ca02c",  # Cooked asparagus green
-    "#d62728",  # Brick red
-    "#9467bd",  # Muted purple
-    "#8c564b",  # Chestnut brown
-    "#e377c2",  # Raspberry yogurt pink
-    "#7f7f7f",  # Middle gray
-    "#bcbd22",  # Curry yellow-green
-    "#17becf",  # Blue-teal
-]
 
-
-# Generate color mapping from predefined list
-def generate_color_mapping(cids):
-    color_map = {}
-    unique_cids = sorted(list(cids))
-    for i, cid in enumerate(unique_cids):
-        color_map[cid] = PREDEFINED_COLORS[i % len(PREDEFINED_COLORS)]
-    return color_map
+# Generate random colors for companies
+def generate_color_mapping(companies):
+    random.seed(69)  # Set seed for reproducibility
+    colors = []
+    for _ in companies:  # low ranges for darker colors
+        r = random.randint(1, 200)
+        g = random.randint(1, 200)
+        b = random.randint(1, 200)
+        colors.append(f"#{r:02x}{g:02x}{b:02x}")
+    return dict(zip(companies, colors))
 
 
 # Function to generate complementary colors
