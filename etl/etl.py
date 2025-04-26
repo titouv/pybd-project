@@ -15,7 +15,7 @@ HOME = "./data/" # for local testing
 BATCH_SIZE = 100_000  # Default batch size for database writes
 
 # Instantiate logger
-logger = mylogging.getLogger(__name__, filename="/tmp/etl.log")
+logger = mylogging.getLogger(__name__)
 
 #=================================================
 # Extract, Transform and Load data in the database
@@ -202,15 +202,12 @@ def batch_df_write(df, table_name, db, batch_size=BATCH_SIZE):
         
     logger.info(f"Completed writing {total_rows} rows to {table_name}")
 
-@timer_decorator
-def store_files(years:list[str], db:TSDB):
-    logger.info(f"Starting ETL process for years {years}")
 
-    if not is_data_present():
-        logger.error("Data not present")
-        raise ValueError("Data not present")
+def load_year(year:str, db:TSDB):
+    global full_companies_db_dataframe
+    years = [year]
+    logger.info(f"Starting ETL process for years {year}")
 
-    verify_db_state(db)
 
     logger.info(f"Reading raw Boursorama data for years {years}")
     raw_boursorama = read_raw_bousorama(years)
@@ -265,17 +262,77 @@ def store_files(years:list[str], db:TSDB):
     companies_db_dataframe['boursorama'] = merged_companies['boursorama']
     companies_db_dataframe['euronext'] = merged_companies['euronext']
 
-    print(companies_db_dataframe.head())
+    # print(companies_db_dataframe.head())
 
-    logger.info("Writing companies data to database")
-    batch_df_write(companies_db_dataframe, 'companies', db)
-    logger.info(f"Stored {len(companies_db_dataframe)} companies")
+    # logger.info("Writing companies data to database")
+    # batch_df_write(companies_db_dataframe, 'companies', db)
+    # logger.info(f"Stored {len(companies_db_dataframe)} companies")
+
+
+    # merge companies_db_dataframe with full_companies_db_dataframe on all columns except id
+    # if not found, add a new line
+    # after that write the new one to db
+    print(f"number of companies for year {year} : {len(companies_db_dataframe)}")
+    print(f"number of all companies before merge : {len(full_companies_db_dataframe)}")
+    
+    # First, ensure full_companies_db_dataframe has an 'id' column if it's empty
+    if len(full_companies_db_dataframe) == 0:
+        full_companies_db_dataframe['id'] = []
+    
+    # Merge while preserving existing IDs
+    full_companies_db_dataframe = pd.merge(
+        full_companies_db_dataframe, 
+        companies_db_dataframe,
+        on=["name", "mid", "symbol", "isin", "boursorama", "euronext"],
+        how='outer'
+    )
+    
+    print(f"number of all companies after merge : {len(full_companies_db_dataframe)}")
+    
+    # Identify new companies (those without an existing ID)
+    new_companies_mask = full_companies_db_dataframe['id_x'].isna()
+    new_companies = full_companies_db_dataframe[new_companies_mask].copy()
+    
+    if len(new_companies) > 0:
+        # For new companies, assign new sequential IDs
+        max_id = full_companies_db_dataframe['id_x'].max() if len(full_companies_db_dataframe) > 0 else -1
+        if pd.isna(max_id):
+            max_id = -1
+        new_ids = range(int(max_id) + 1, int(max_id) + 1 + len(new_companies))
+        new_companies['id'] = list(new_ids)
+        
+        # Update the full DataFrame with new IDs
+        full_companies_db_dataframe.loc[new_companies_mask, 'id'] = new_companies['id']
+        
+        # Clean up merge columns in new_companies DataFrame
+        new_companies = new_companies[['id', 'name', 'mid', 'symbol', 'isin', 'boursorama', 'euronext']]
+        
+        logger.info(f"Writing {len(new_companies)} new companies to database")
+        batch_df_write(new_companies, 'companies', db)
+        logger.info(f"Stored {len(new_companies)} new companies")
+    else:
+        logger.info("No new companies to write to database")
+    
+    # Clean up merge columns in full DataFrame
+    if 'id_x' in full_companies_db_dataframe.columns:
+        full_companies_db_dataframe['id'] = full_companies_db_dataframe['id_x'].fillna(full_companies_db_dataframe['id'])
+        full_companies_db_dataframe.drop(columns=['id_x', 'id_y'], inplace=True)
+    
+    # Ensure id column is integer type
+    full_companies_db_dataframe['id'] = full_companies_db_dataframe['id'].astype(int)
+    
+    # Sort by ID for consistency
+    full_companies_db_dataframe.sort_values(by=['id'], inplace=True)
+    full_companies_db_dataframe.reset_index(drop=True, inplace=True)
+    
+    print("ID range:", full_companies_db_dataframe['id'].min(), "to", full_companies_db_dataframe['id'].max())
+    print(f"Total number of companies after processing year {year}: {len(full_companies_db_dataframe)}")
 
     # add column company_id into raw_boursorama and raw_euronext
-    bousorama_to_id = dict(zip(companies_db_dataframe['boursorama'], companies_db_dataframe['id']))
+    bousorama_to_id = dict(zip(full_companies_db_dataframe['boursorama'], full_companies_db_dataframe['id']))
     raw_boursorama['company_id'] = raw_boursorama['symbol'].map(bousorama_to_id)
 
-    euronext_to_id = dict(zip(companies_db_dataframe['euronext'], companies_db_dataframe['id']))
+    euronext_to_id = dict(zip(full_companies_db_dataframe['euronext'], full_companies_db_dataframe['id']))
     raw_euronext['company_id'] = raw_euronext['Name'].map(euronext_to_id)
     
     logger.info("Preparing daystocks data from Euronext")
@@ -325,6 +382,9 @@ def store_files(years:list[str], db:TSDB):
     # Clean the 'last' column *before* aggregation
     raw_boursorama_agg['value'] = get_clean_last_boursorama(raw_boursorama_agg)
 
+
+
+    print("raw_boursorama_agg", raw_boursorama_agg.head())
     # Aggregate daily data
     daystocks_boursorama = raw_boursorama_agg.groupby('company_id').resample('D').agg(
         open=('value', 'first'),
@@ -336,6 +396,8 @@ def store_files(years:list[str], db:TSDB):
 
     # Rename columns to match daystocks_db_dataframe
     daystocks_boursorama.rename(columns={'company_id': 'cid'}, inplace=True)
+
+    print("daystocks_boursorama", daystocks_boursorama.head())
     
     # Keep only relevant columns and ensure correct order
     daystocks_boursorama = daystocks_boursorama[['date', 'cid', 'open', 'close', 'high', 'low', 'volume']]
@@ -404,8 +466,30 @@ def store_files(years:list[str], db:TSDB):
     stocks_db_dataframe
 
     logger.info("Writing stocks data to database")
-    batch_df_write(stocks_db_dataframe, 'stocks', db)
+    # batch_df_write(stocks_db_dataframe, 'stocks', db)
     logger.info(f"Stored {len(stocks_db_dataframe)} stocks entries")
+
+@timer_decorator
+def store_files(years:list[str], db:TSDB):
+    global full_companies_db_dataframe
+    
+    # Initialize the global DataFrame that will store all companies
+    full_companies_db_dataframe = pd.DataFrame(
+        columns=[
+            "id", "name", "mid", "symbol", "isin", "boursorama", "euronext", 
+        ],
+    )
+
+    logger.info(f"Starting ETL process for years {years}")
+
+    if not is_data_present():
+        logger.error("Data not present")
+        raise ValueError("Data not present")
+
+    verify_db_state(db)
+
+    for year in years:
+        load_year(year, db)
 
     logger.info("ETL process finished successfully.")
     
@@ -423,5 +507,6 @@ if __name__ == '__main__':
     # db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'db', 'monmdp')        # inside docker
     db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'localhost', 'monmdp') # outside docker
     years = ["2020", "2021", "2022", "2023", "2024"]
+    print("Start Extract Transform and Load")
     store_files(years, db)
     print("Done Extract Transform and Load")
