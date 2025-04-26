@@ -78,7 +78,7 @@ def get_stock_data(cids=None):
     print(f"With Parameters: {params}")
 
     try:
-        companies_df = db.df_query(query, params)
+        companies_df = db.df_query(query, params=params)
         print(
             f"Query returned DataFrame shape: {companies_df.shape}"
         )
