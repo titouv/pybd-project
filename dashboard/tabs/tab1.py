@@ -22,10 +22,39 @@ theme = {
     "text": "#212529",  # Text color
 }
 
+# Define expected columns for consistency, even when empty
+EXPECTED_COLUMNS = [
+    "Cid",
+    "Company",
+    "Symbol",
+    "Date",
+    "Open",
+    "Close",
+    "High",
+    "Low",
+    "Volume",
+    "Value",
+    "CloseValue",
+    "CompanyDisplay",
+]
 
-def get_stock_data():
-    companies = db.df_query(
-        """
+
+def get_stock_data(cids=None):
+    """
+    Fetches all historical stock data for a given list of company Cids.
+    No date filtering is applied here.
+    """
+    print(f"--- get_stock_data called with cids: {cids} ---")
+
+    if not cids:
+        print("No CIDs provided, returning empty DataFrame.")
+        return pd.DataFrame(columns=EXPECTED_COLUMNS)
+
+    if isinstance(cids, (int, str)):
+        cids = [cids]
+    print(f"Processed CIDs for query: {cids}")
+
+    query = """
         SELECT 
             c.id as cid, 
             c.name as company, 
@@ -40,11 +69,29 @@ def get_stock_data():
             ds.close as close_value
         FROM companies c
         JOIN daystocks ds ON c.id = ds.cid
-        ORDER BY ds.date DESC
-        """
-    )
-    companies["date"] = pd.to_datetime(companies["date"], utc=True)
-    companies = companies.rename(
+        WHERE c.id IN %(cids)s
+        ORDER BY c.id, ds.date ASC
+    """
+    params = {"cids": tuple(cids)}
+
+    print(f"Executing SQL Query:\n{query}")
+    print(f"With Parameters: {params}")
+
+    try:
+        companies_df = db.df_query(query, params)
+        print(
+            f"Query returned DataFrame shape: {companies_df.shape}"
+        )
+    except Exception as e:
+        print(f"!!! ERROR during db.df_query: {e}")
+        companies_df = pd.DataFrame(columns=EXPECTED_COLUMNS)
+
+    if companies_df.empty:
+        print("Query returned an empty DataFrame.")
+        return pd.DataFrame(columns=EXPECTED_COLUMNS)
+
+    # Rename columns
+    companies_df = companies_df.rename(
         columns={
             "cid": "Cid",
             "company": "Company",
@@ -59,7 +106,51 @@ def get_stock_data():
             "close_value": "CloseValue",
         }
     )
-    return companies
+
+    # Convert Date column
+    companies_df["Date"] = pd.to_datetime(companies_df["Date"], utc=True)
+
+    # Add CompanyDisplay column
+    companies_df["CompanyDisplay"] = (
+        companies_df["Company"] + " (" + companies_df["Symbol"] + ")"
+    )
+
+    # Ensure all expected columns are present
+    for col in EXPECTED_COLUMNS:
+        if col not in companies_df.columns:
+            companies_df[col] = None
+
+    print(
+        f"--- get_stock_data finished, returning shape: {companies_df[EXPECTED_COLUMNS].shape} ---"
+    )
+    return companies_df[EXPECTED_COLUMNS]
+
+
+def get_all_company_options():
+    """
+    Fetches all companies for populating the dropdown.
+    """
+    query = """
+        SELECT 
+            c.id as cid, 
+            c.name as company, 
+            c.symbol as symbol
+        FROM companies c
+        ORDER BY c.name ASC
+    """
+    companies_df = db.df_query(query)
+
+    if companies_df.empty:
+        return []
+
+    companies_df["CompanyDisplay"] = (
+        companies_df["company"] + " (" + companies_df["symbol"] + ")"
+    )
+
+    return [
+        {"label": row["CompanyDisplay"], "value": row["cid"]}
+        for _, row in companies_df.iterrows()
+    ]
 
 
 class StabilityLevel(Enum):
@@ -79,15 +170,6 @@ def risk_level_from_vol(vol):
         return StabilityLevel.SLIGHTLY_UNSTABLE
     else:
         return StabilityLevel.HIGHLY_UNSTABLE
-
-
-# Get initial data
-df = get_stock_data()
-df["CompanyDisplay"] = df["Company"] + " (" + df["Symbol"] + ")"
-
-# Calculate daily returns for each company (needed for callbacks)
-df = df.sort_values(["Company", "Date"])
-df["Return"] = df.groupby("Company")["Close"].pct_change()
 
 
 # Generate random colors for companies
@@ -137,10 +219,6 @@ def calculate_bollinger_bands(df, num_std=2, window=20):
 
     return df
 
-
-# Dynamically generate color mapping
-color_mapping = generate_color_mapping(df["Cid"].unique())
-
 # Footer for the layout
 footer = html.Footer(
     html.P(
@@ -163,7 +241,7 @@ bollinger_state_store = dcc.Store(id="bollinger-state-store", data={})
 xaxis_range_store = dcc.Store(id="xaxis-range-store", data=None)
 date_range_store = dcc.Store(
     id="date-range-store",
-    data={"start_date": df["Date"].min(), "end_date": df["Date"].max()},
+    data=None,
 )
 
 # Wrapping main content in cards
@@ -187,10 +265,6 @@ tab1_layout = html.Div(
                                     ),
                                     dcc.DatePickerRange(
                                         id="date-picker",
-                                        min_date_allowed=df["Date"].min(),
-                                        max_date_allowed=df["Date"].max(),
-                                        start_date=df["Date"].min(),
-                                        end_date=df["Date"].max(),
                                         display_format="DD/MM/YYYY",
                                         style={"width": "300px"},
                                     ),
@@ -303,15 +377,7 @@ tab1_layout = html.Div(
                                     html.H5("Company Selector", className="card-title"),
                                     dcc.Dropdown(
                                         id="company-selector",
-                                        options=[
-                                            {
-                                                "label": row["CompanyDisplay"],
-                                                "value": row["Cid"],
-                                            }
-                                            for _, row in df.drop_duplicates(
-                                                "Cid"
-                                            ).iterrows()
-                                        ],
+                                        options=get_all_company_options(),
                                         value=[],
                                         multi=True,
                                         placeholder="Search and select companies...",
@@ -341,7 +407,7 @@ tab1_layout = html.Div(
 )
 
 
-# Callback to handle chart type toggle and update the graph with Bollinger Bands
+# Callback to handle chart type toggle and update the graph
 @app.callback(
     [
         ddep.Output("line-button", "style"),
@@ -356,7 +422,7 @@ tab1_layout = html.Div(
         ddep.Input("company-selector", "value"),
         ddep.Input("date-picker", "start_date"),
         ddep.Input("date-picker", "end_date"),
-        ddep.Input("stock-graph", "relayoutData"),  # <--- add this
+        ddep.Input("stock-graph", "relayoutData"),
         ddep.Input({"type": "bollinger-checkbox", "index": ALL}, "value"),
         ddep.Input("bollinger-state-store", "data"),
         ddep.Input("bollinger-window-slider", "value"),
@@ -369,212 +435,250 @@ def update_chart(
     line_clicks,
     candlestick_clicks,
     selected_companies,
-    start_date,
-    end_date,
-    relayout_data,  # <--- add this
+    start_date_input,
+    end_date_input,
+    relayout_data,
     bollinger_values,
     bollinger_state,
     window_size,
     checkbox_ids,
 ):
-    # Determine the range to use
-    if relayout_data:
-        # Handle zoom/pan/range selector
-        if "xaxis.range[0]" in relayout_data and "xaxis.range[1]" in relayout_data:
-            start_date = (
-                pd.to_datetime(relayout_data["xaxis.range[0]"]).date().isoformat()
-            )
-            end_date = (
-                pd.to_datetime(relayout_data["xaxis.range[1]"]).date().isoformat()
-            )
-        elif "xaxis.autorange" in relayout_data and relayout_data["xaxis.autorange"]:
-            # "ALL" button or double-click: reset to full range
-            start_date = df["Date"].min().date().isoformat()
-            end_date = df["Date"].max().date().isoformat()
-
-    print("Callback triggered!")
-    print("Selected companies:", selected_companies)
-    print("Start date:", start_date)
-    print("End date:", end_date)
-
-    # Get current figure if it exists
+    print("\n--- update_chart triggered ---")
     ctx = callback_context
+    triggered_id = ctx.triggered[0]["prop_id"] if ctx.triggered else "Initial load"
+    print(f"Triggered by: {triggered_id}")
 
-    # Determine which button was clicked
+    start_date = start_date_input
+    end_date = end_date_input
+
+    if relayout_data:
+        if "xaxis.range[0]" in relayout_data and "xaxis.range[1]" in relayout_data:
+            start_date = pd.to_datetime(relayout_data["xaxis.range[0]"], utc=True)
+            end_date = pd.to_datetime(relayout_data["xaxis.range[1]"], utc=True)
+            start_date_input = start_date.strftime("%Y-%m-%d")
+            end_date_input = end_date.strftime("%Y-%m-%d")
+        elif "xaxis.autorange" in relayout_data and relayout_data["xaxis.autorange"]:
+            start_date = None
+            end_date = None
+            start_date_input = None
+            end_date_input = None
+    else:
+        start_date = (
+            pd.to_datetime(start_date_input, utc=True) if start_date_input else None
+        )
+        end_date = pd.to_datetime(end_date_input, utc=True) if end_date_input else None
+
+    print(f"Initial Dates: start={start_date_input}, end={end_date_input}")
+    print(f"Dates after relayout/parse: start={start_date}, end={end_date}")
+
+    if selected_companies is None:
+        selected_companies = []
+    elif isinstance(selected_companies, (int, str)):
+        selected_companies = [selected_companies]
+    print(f"Selected Company CIDs: {selected_companies}")
+
+    if line_clicks is None:
+        line_clicks = 0
+    if candlestick_clicks is None:
+        candlestick_clicks = 0
     if line_clicks >= candlestick_clicks:
         chart_type = "line"
-        line_style = {"backgroundColor": "green", "color": "white", "width": "100px"}
+        line_style = {
+            "backgroundColor": theme["success"],
+            "color": "white",
+            "width": "100px",
+        }
         candlestick_style = {
             "backgroundColor": "white",
             "color": "black",
             "width": "150px",
         }
-        graph_title = "Linear Stock Chart"
+        graph_title = "Stock Price (Line)"
     else:
         chart_type = "candlestick"
         line_style = {"backgroundColor": "white", "color": "black", "width": "100px"}
         candlestick_style = {
-            "backgroundColor": "green",
+            "backgroundColor": theme["success"],
             "color": "white",
             "width": "150px",
         }
-        graph_title = "Candlestick Stock Chart"
+        graph_title = "Stock Price (Candlestick)"
 
-    # Preserve the current view's time range
-    if start_date is None or end_date is None:
-        start_date = df["Date"].min()
-        end_date = df["Date"].max()
+    print(f"Chart Type: {chart_type}")
+
+    print("Fetching data...")
+    fetched_df = get_stock_data(selected_companies)
+    print(f"Fetched DataFrame shape: {fetched_df.shape}")
+    if not fetched_df.empty:
+        print("Fetched DataFrame head:\n", fetched_df.head())
     else:
-        start_date = pd.to_datetime(start_date)
-        end_date = pd.to_datetime(end_date)
-        if not pd.Timestamp(start_date).tzinfo:
-            start_date = pd.to_datetime(start_date).tz_localize("UTC")
-        if not pd.Timestamp(end_date).tzinfo:
-            end_date = pd.to_datetime(end_date).tz_localize("UTC")
+        print("Fetched DataFrame is EMPTY.")
+        # Early exit if no data fetched at all
+        fig = go.Figure()
+        fig.update_layout(
+            title="No data for selected companies",
+            xaxis_title="Time",
+            yaxis_title="Stock Value",
+        )
+        return line_style, candlestick_style, fig, start_date_input, end_date_input
 
-    # Filter data based on selected companies and timeframe
-    filtered_df = (
-        df[
-            (df["Cid"].isin(selected_companies))
-            & (df["Date"] >= start_date)
-            & (df["Date"] <= end_date)
-        ]
-        .sort_values(["Cid", "Date"])
-        .copy()
-    )
+    print("Filtering data by date...")
+    if start_date and end_date:
+        start_date_dt = pd.to_datetime(start_date, utc=True)
+        end_date_dt = pd.to_datetime(end_date, utc=True)
+        print(f"Filtering between {start_date_dt} and {end_date_dt}")
+        filtered_df = fetched_df[
+            (fetched_df["Date"] >= start_date_dt) & (fetched_df["Date"] <= end_date_dt)
+        ].copy()
+    else:
+        print("No date range specified, using all fetched data.")
+        filtered_df = fetched_df.copy()
+        if not filtered_df.empty:
+            start_date_input = filtered_df["Date"].min().strftime("%Y-%m-%d")
+            end_date_input = filtered_df["Date"].max().strftime("%Y-%m-%d")
 
+    print(f"Filtered DataFrame shape: {filtered_df.shape}")
+    if not filtered_df.empty:
+        print("Filtered DataFrame head:\n", filtered_df.head())
+    else:
+        print("Filtered DataFrame is EMPTY after date filtering.")
+        fig = go.Figure()
+        fig.update_layout(
+            title="No data for selected date range",
+            xaxis_title="Time",
+            yaxis_title="Stock Value",
+        )
+        return line_style, candlestick_style, fig, start_date_input, end_date_input
+
+    print("Calculating Return and Volatility...")
     filtered_df["Return"] = filtered_df.groupby("Cid")["Close"].pct_change()
     volatility = filtered_df.groupby("Cid")["Return"].std()
+    print(f"Volatility calculated:\n{volatility}")
 
-    # After filtering the data:
-    if len(filtered_df) > 0:
-        min_date = filtered_df["Date"].min().date().isoformat()
-        max_date = filtered_df["Date"].max().date().isoformat()
-        display_range = [min_date, max_date]
-    else:
-        min_date = start_date
-        max_date = end_date
-        display_range = [start_date, end_date]  # fallback
+    color_mapping = generate_color_mapping(selected_companies)
+    print(f"Color Mapping: {color_mapping}")
 
-    if len(filtered_df) > 0:
-        print("Data range:", filtered_df["Date"].min(), "to", filtered_df["Date"].max())
-        print(
-            "Sample data for first company:",
-            filtered_df[filtered_df["Cid"] == selected_companies[0]].head(),
-        )
-    else:
-        print("No data in filtered_df")
-
-    # Print volatility for each selected company
-    for cid in selected_companies:
-        vol = volatility.get(cid, None)
-        print(f"[Chart] Volatility for company ID {cid}: {vol}")
-
-    # Combine checkbox values and stored state
     companies_with_bollinger = []
-
-    # Add companies from checkbox values
+    bollinger_state = bollinger_state or {}
+    active_checkbox_cids = set()
     if checkbox_ids and bollinger_values:
         for i, checkbox_id in enumerate(checkbox_ids):
             cid_str = checkbox_id["index"]
-            if (
-                i < len(bollinger_values)
-                and bollinger_values[i]
-                and int(cid_str) in selected_companies
-            ):
-                companies_with_bollinger.append(int(cid_str))
+            if i < len(bollinger_values) and bollinger_values[i]:
+                try:
+                    active_checkbox_cids.add(int(cid_str))
+                except ValueError:
+                    pass
 
-    # Add companies from stored state for any that might be missing from checkbox values
-    # (this handles situations where the checkbox might not be rendered yet)
     for cid in selected_companies:
-        if (
-            bollinger_state
-            and str(cid) in bollinger_state
-            and cid not in companies_with_bollinger
-        ):
+        if str(cid) in bollinger_state and bollinger_state[str(cid)]:
+            companies_with_bollinger.append(cid)
+        elif cid in active_checkbox_cids and cid not in companies_with_bollinger:
             companies_with_bollinger.append(cid)
 
-    # Generate the appropriate chart
+    print(f"Companies with Bollinger Bands: {companies_with_bollinger}")
+    print(f"Bollinger Window Size: {window_size}")
+
+    print("Generating chart traces...")
     fig = go.Figure()
 
     for cid in selected_companies:
-        company_data = filtered_df[filtered_df["Cid"] == cid]
-        company_display = df[df["Cid"] == cid]["CompanyDisplay"].iloc[0]
+        print(f"Processing CID: {cid}")
+        company_data_filtered = filtered_df[filtered_df["Cid"] == cid]
+        print(
+            f"  Data shape for CID {cid} after filtering: {company_data_filtered.shape}"
+        )
 
-        # Main price trace
+        if company_data_filtered.empty:
+            print(f"  Skipping CID {cid} - no data in filtered range.")
+            continue
+
+        company_display_row = fetched_df[fetched_df["Cid"] == cid]
+        if not company_display_row.empty:
+            company_display = company_display_row["CompanyDisplay"].iloc[0]
+        else:
+            company_display = f"Company {cid}"
+
+        company_color = color_mapping.get(cid, "#000000")
+        print(f"  Display Name: {company_display}, Color: {company_color}")
+
         if chart_type == "line":
+            print(f"  Adding Line trace for CID {cid}")
             fig.add_trace(
                 go.Scatter(
-                    x=company_data["Date"],
-                    y=company_data["Close"],
+                    x=company_data_filtered["Date"],
+                    y=company_data_filtered["Close"],
                     mode="lines",
-                    name=company_display,  # Only the display name
-                    line=dict(color=color_mapping[cid]),
+                    name=company_display,
+                    line=dict(color=company_color),
                 )
             )
         elif chart_type == "candlestick":
+            print(f"  Adding Candlestick trace for CID {cid}")
             fig.add_trace(
                 go.Candlestick(
-                    x=company_data["Date"],
-                    open=company_data["Open"],
-                    high=company_data["High"],
-                    low=company_data["Low"],
-                    close=company_data["Close"],
+                    x=company_data_filtered["Date"],
+                    open=company_data_filtered["Open"],
+                    high=company_data_filtered["High"],
+                    low=company_data_filtered["Low"],
+                    close=company_data_filtered["Close"],
                     name=company_display,
-                    increasing_line_color=color_mapping[cid],
+                    increasing_line_color=company_color,
                     decreasing_line_color=generate_complementary_color(
-                        color_mapping[cid], increase=False
+                        company_color, increase=False
                     ),
                 )
             )
 
-        # Bollinger Bands
         if cid in companies_with_bollinger:
-            company_data = calculate_bollinger_bands(
-                company_data, num_std=2, window=window_size
+            print(f"  Calculating and adding Bollinger Bands for CID {cid}")
+            company_data_bollinger = calculate_bollinger_bands(
+                company_data_filtered, num_std=2, window=window_size
             )
-            # Add Upper Band
             fig.add_trace(
                 go.Scatter(
-                    x=company_data["Date"],
-                    y=company_data["Upper Band"],
+                    x=company_data_bollinger["Date"],
+                    y=company_data_bollinger["Upper Band"],
                     mode="lines",
-                    name=f"{company_display} Upper Band",
-                    line=dict(color=color_mapping[cid], width=1, dash="dot"),
+                    name=f"{company_display} Upper",
+                    line=dict(color=company_color, width=1, dash="dot"),
                     opacity=0.7,
                     showlegend=True,
                 )
             )
-            # Add Lower Band (fill to Upper Band)
             fig.add_trace(
                 go.Scatter(
-                    x=company_data["Date"],
-                    y=company_data["Lower Band"],
+                    x=company_data_bollinger["Date"],
+                    y=company_data_bollinger["Lower Band"],
                     mode="lines",
-                    name=f"{company_display} Lower Band",
-                    line=dict(color=color_mapping[cid], width=1, dash="dot"),
+                    name=f"{company_display} Lower",
+                    line=dict(color=company_color, width=1, dash="dot"),
                     opacity=0.3,
                     showlegend=True,
                     fill="tonexty",
                 )
             )
-            # Add Moving Average
             fig.add_trace(
                 go.Scatter(
-                    x=company_data["Date"],
-                    y=company_data["Moving Average"],
+                    x=company_data_bollinger["Date"],
+                    y=company_data_bollinger["Moving Average"],
                     mode="lines",
                     name=f"{company_display} MA",
-                    line=dict(color=color_mapping[cid], width=1, dash="dash"),
-                    opacity=0.5,
+                    line=dict(color=company_color, width=1.5, dash="dash"),
+                    opacity=0.6,
                     showlegend=True,
                 )
             )
+        else:
+            print(f"  Bollinger Bands not enabled for CID {cid}")
 
+    print(f"Total traces added to figure: {len(fig.data)}")
+
+    print("Updating figure layout...")
     fig.update_layout(
         title=graph_title,
         xaxis_title="Time",
-        yaxis_title="Stock Value (In USD)",
+        yaxis_title="Stock Value (Log Scale)",
         template="plotly_white",
         title_x=0.5,
         margin={"l": 20, "r": 20, "t": 40, "b": 20},
@@ -584,7 +688,6 @@ def update_chart(
                 thickness=0.05,
                 bgcolor="#F5F5F5",
             ),
-            range=display_range,  # Use the filtered range
             rangeselector=dict(
                 buttons=list(
                     [
@@ -600,7 +703,7 @@ def update_chart(
                 activecolor=theme["primary"],
                 y=1.1,
             ),
-            type="date",  # Ensure proper date handling
+            type="date",
             calendar="gregorian",
         ),
         yaxis_type="log",
@@ -608,15 +711,15 @@ def update_chart(
             bgcolor="white",
             font_size=14,
             font_family="Arial",
-            namelength=-1,  # Never truncate the name in hover
+            namelength=-1,
         ),
         hovermode="x unified",
     )
 
-    return line_style, candlestick_style, fig, min_date, max_date
+    print("--- update_chart finished ---\n")
+    return line_style, candlestick_style, fig, start_date_input, end_date_input
 
 
-# Callback to update the company table and dropdown options
 @app.callback(
     [
         ddep.Output("company-table", "children"),
@@ -636,93 +739,64 @@ def update_chart(
 def update_company_table(
     selected_companies, delete_clicks, start_date, end_date, bollinger_state
 ):
-    # Initialize selected_companies as an empty list if None
     if selected_companies is None:
         selected_companies = []
+    elif isinstance(selected_companies, (int, str)):
+        selected_companies = [selected_companies]
 
-    # Initialize bollinger_state if None
-    if bollinger_state is None:
-        bollinger_state = {}
+    bollinger_state = bollinger_state or {}
 
     ctx = callback_context
-
+    triggered_dict = {}
     if ctx.triggered:
-        print("PropID:", ctx.triggered[0]["prop_id"])
+        prop_id = ctx.triggered[0]["prop_id"]
+        if "{" in prop_id and "}" in prop_id:
+            try:
+                import json
 
-        # Split the prop_id and rejoin all parts except the last one
-        prop_id_parts = ctx.triggered[0]["prop_id"].split(".")
-        triggered_id = ".".join(prop_id_parts[:-1])  # Component ID
-        triggered_property = prop_id_parts[-1]  # Property
+                json_part = prop_id[prop_id.find("{") : prop_id.rfind("}") + 1]
+                triggered_dict = json.loads(json_part)
+            except json.JSONDecodeError as e:
+                triggered_dict = {}
+        else:
+            triggered_id = prop_id.split(".")[0]
 
-        print("Triggered ID (raw):", triggered_id)
-        print("Triggered Property:", triggered_property)
-
-        # Safely parse the triggered_id
-        try:
-            import json
-
-            triggered_dict = json.loads(triggered_id)
-        except json.JSONDecodeError as e:
-            print("Error parsing triggered_id:", e)
-            triggered_dict = {}
-
-        print("Triggered Dict:", triggered_dict)
-
-        # Handle delete button click
-        if (
-            isinstance(triggered_dict, dict)
-            and triggered_dict.get("type") == "delete-button"
-        ):
-            cid_to_remove = triggered_dict.get("index")
-            print("Company to Remove:", cid_to_remove)
-            print("Selected Companies Before Removal:", selected_companies)
-
-            if cid_to_remove:
-                # Convert cid_to_remove to integer since it comes as string from the button
+        if triggered_dict.get("type") == "delete-button":
+            cid_to_remove_str = triggered_dict.get("index")
+            if cid_to_remove_str:
                 try:
-                    cid_to_remove = int(cid_to_remove)
+                    cid_to_remove = int(cid_to_remove_str)
                     if cid_to_remove in selected_companies:
                         selected_companies.remove(cid_to_remove)
-                        print("Selected Companies After Removal:", selected_companies)
                 except ValueError:
-                    print(f"Error converting cid_to_remove {cid_to_remove} to integer")
+                    pass
 
-    # Filter df for the current timeframe
-    filtered_df = (
-        df[
-            (df["Cid"].isin(selected_companies))
-            & (df["Date"] >= start_date)
-            & (df["Date"] <= end_date)
-        ]
-        .sort_values(["Cid", "Date"])
-        .copy()
-    )
+    fetched_df = get_stock_data(selected_companies)
 
-    filtered_df["Return"] = filtered_df.groupby("Cid")["Close"].pct_change()
-    volatility = filtered_df.groupby("Cid")["Return"].std()
+    if start_date and end_date:
+        start_date_dt = pd.to_datetime(start_date, utc=True)
+        end_date_dt = pd.to_datetime(end_date, utc=True)
+        filtered_df_for_volatility = fetched_df[
+            (fetched_df["Date"] >= start_date_dt) & (fetched_df["Date"] <= end_date_dt)
+        ].copy()
+    else:
+        filtered_df_for_volatility = fetched_df.copy()
 
-    # Print volatility for each selected company
-    for cid in selected_companies:
-        vol = volatility.get(cid, None)
-        print(f"Volatility for company ID {cid}: {vol}")
+    if not filtered_df_for_volatility.empty:
+        filtered_df_for_volatility["Return"] = filtered_df_for_volatility.groupby(
+            "Cid"
+        )["Close"].pct_change()
+        volatility = filtered_df_for_volatility.groupby("Cid")["Return"].std()
+    else:
+        volatility = pd.Series(dtype=float)
 
     stability_mapping = {
         cid: risk_level_from_vol(volatility.get(cid, None))
         for cid in selected_companies
     }
 
-    print("Updated stability mapping:", stability_mapping)
+    all_options = get_all_company_options()
 
-    # Update dropdown options to exclude selected companies
-    all_options = [
-        {
-            "label": row["CompanyDisplay"],
-            "value": row["Cid"],
-        }
-        for _, row in df.drop_duplicates("Cid").iterrows()
-    ]
-
-    # Generate the company table
     if selected_companies:
         table_header = html.Div(
             children=[
@@ -782,26 +856,19 @@ def update_company_table(
 
         table_rows = []
         for i, cid in enumerate(selected_companies):
-            # Alternate row background colors for better readability
             row_bg_color = "#f9f9f9" if i % 2 == 0 else "white"
-
-            # Get stability info
             stability = stability_mapping.get(cid, StabilityLevel.STABLE)
-
-            # Check if this company has Bollinger Bands enabled in the stored state
             is_bollinger_enabled = bollinger_state.get(str(cid), False)
 
-            # Get company display name using Cid
-            company_data = df[df["Cid"] == cid]
-            if not company_data.empty:
-                name = company_data.iloc[0]["CompanyDisplay"]
+            company_info = fetched_df[fetched_df["Cid"] == cid]
+            if not company_info.empty:
+                name = company_info.iloc[0]["CompanyDisplay"]
             else:
-                name = f"Unknown Company ({cid})"
+                name = f"Company {cid}"
 
             table_rows.append(
                 html.Div(
                     [
-                        # Riskiness with colorful badge
                         html.Div(
                             html.Span(
                                 stability.value["label"],
@@ -820,7 +887,6 @@ def update_company_table(
                                 "padding": "8px",
                             },
                         ),
-                        # Company Name
                         html.Div(
                             name,
                             style={
@@ -833,14 +899,11 @@ def update_company_table(
                                 "whiteSpace": "nowrap",
                             },
                         ),
-                        # Bollinger Checkbox - use the stored state
                         html.Div(
                             dcc.Checklist(
                                 options=[{"label": "", "value": "bollinger"}],
                                 id={"type": "bollinger-checkbox", "index": str(cid)},
-                                value=(
-                                    ["bollinger"] if is_bollinger_enabled else []
-                                ),
+                                value=(["bollinger"] if is_bollinger_enabled else []),
                                 className="bollinger-checkbox",
                                 style={"marginLeft": "10px", "transform": "scale(1.2)"},
                             ),
@@ -852,7 +915,6 @@ def update_company_table(
                                 "padding": "8px",
                             },
                         ),
-                        # Delete Button
                         html.Div(
                             dbc.Button(
                                 "✖",
@@ -893,7 +955,6 @@ def update_company_table(
 
         table_content = [table_header] + table_rows
     else:
-        # Display a placeholder message if no companies are selected
         table_content = html.Div(
             [
                 html.Span("ℹ️", style={"marginRight": "5px"}),
@@ -909,7 +970,6 @@ def update_company_table(
             },
         )
 
-    # Update company table container styling
     return table_content, all_options, selected_companies
 
 
@@ -922,19 +982,13 @@ def update_company_table(
     [ddep.State("bollinger-state-store", "data")],
 )
 def update_bollinger_state(checkbox_values, checkbox_ids, current_state):
-    # Initialize state if it doesn't exist
     if not current_state:
         current_state = {}
 
-    # Update state with new checkbox values
     for i, checkbox_id in enumerate(checkbox_ids):
         cid_str = checkbox_id["index"]
         value = checkbox_values[i] if i < len(checkbox_values) else []
-        if value:
-            current_state[cid_str] = True
-        else:
-            # Only remove from state if it exists
-            current_state.pop(cid_str, None)
+        current_state[cid_str] = bool(value)
 
     return current_state
 
@@ -947,14 +1001,18 @@ def update_bollinger_state(checkbox_values, checkbox_ids, current_state):
         ddep.Input("stock-graph", "relayoutData"),
     ],
     [ddep.State("xaxis-range-store", "data")],
+    prevent_initial_call=True,
 )
-def update_xaxis_range(start_date, end_date, relayout_data, current_range):
-    # If the slider or range selector is used
-    if (
-        relayout_data
-        and "xaxis.range[0]" in relayout_data
-        and "xaxis.range[1]" in relayout_data
-    ):
-        return [relayout_data["xaxis.range[0]"], relayout_data["xaxis.range[1]"]]
-    # If the date picker is used
-    return [start_date, end_date]
+def sync_date_inputs(start_date_picker, end_date_picker, relayout_data, current_range):
+    ctx = callback_context
+    triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
+
+    if triggered_id == "stock-graph" and relayout_data:
+        if "xaxis.range[0]" in relayout_data and "xaxis.range[1]" in relayout_data:
+            return [relayout_data["xaxis.range[0]"], relayout_data["xaxis.range[1]"]]
+        elif "xaxis.autorange" in relayout_data and relayout_data["xaxis.autorange"]:
+            return None
+    elif triggered_id == "date-picker":
+        return [start_date_picker, end_date_picker]
+
+    return current_range

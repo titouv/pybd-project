@@ -368,30 +368,38 @@ class TimescaleStockMarketModel:
         try:
             cursor.execute(query, args)
             query = query.strip().upper()
-            if query.startswith('SELECT'):
+            if query.startswith("SELECT"):
                 return cursor.fetchall()
         except Exception as e:
             self.logger.error(f"Exception with raw_query: {e}")
             if self.connection:
                 self.connection.rollback()
 
-    def df_query(self, query, args=None, index_col=None, coerce_float=True, params=None, 
-                 parse_dates=None, columns=None, chunksize=None, dtype=None):
-        '''Returns a Pandas dataframe from a Postgres SQL query
+    def df_query(self, query, params=None, index_col=None, coerce_float=True, parse_dates=None, columns=None, chunksize=None, dtype=None,):
+        '''Returns a Pandas dataframe from a Postgres SQL query using DB-API parameters.
 
-        :param query:
-        :param args: arguments for the query
+        :param query: SQL query string with placeholders (e.g., %(name)s or :name).
+        :param params: Dictionary or list of parameters to substitute into the query.
         :param index_col: index column of the DataFrame
         :param other args: see https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_sql.html
         :return: a dataframe
         '''
-        if args is not None:
-            query = query % args
-        self.logger.debug('df_query: %s' % query)
+        # Removed the old 'args' formatting logic as 'params' is the standard way for pd.read_sql
+        self.logger.debug(f"df_query SQL: {query}")
+        if params:
+            self.logger.debug(f"df_query Params: {params}")
         try:
-            res = pd.read_sql(query, self.__engine, index_col=index_col, coerce_float=coerce_float, 
-                           params=params, parse_dates=parse_dates, columns=columns, 
-                           chunksize=chunksize, dtype=dtype)
+            res = pd.read_sql(
+                query,
+                self.__engine,
+                index_col=index_col,
+                coerce_float=coerce_float,
+                params=params,  # Pass params directly to pandas/SQLAlchemy
+                parse_dates=parse_dates,
+                columns=columns,
+                chunksize=chunksize,
+                dtype=dtype,
+            )
         except Exception as e:
             self.logger.error(e)
             res = pd.DataFrame()
