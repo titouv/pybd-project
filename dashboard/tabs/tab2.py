@@ -184,57 +184,79 @@ tab2_layout = html.Div(
         ddep.Input("tab2-quick-30", "n_clicks"),
         ddep.Input("tab2-quick-all", "n_clicks"),
     ],
-    [
-        ddep.State("tab2-date-picker", "min_date_allowed"),
-        ddep.State("tab2-date-picker", "max_date_allowed"),
-    ],
 )
 def update_tab2_table(
     selected_companies,
-    start_date,
-    end_date,
+    start_date_input,
+    end_date_input,
     page_size,
     n7,
     n30,
     nall,
-    min_date,
-    max_date,
 ):
     ctx = callback_context
-    # Quick select logic
-    if ctx.triggered:
-        trigger = ctx.triggered[0]["prop_id"].split(".")[0]
-        if trigger == "tab2-quick-7":
-            end_date = pd.to_datetime(max_date)
-            start_date = end_date - pd.Timedelta(days=6)
-        elif trigger == "tab2-quick-30":
-            end_date = pd.to_datetime(max_date)
-            start_date = end_date - pd.Timedelta(days=29)
-        elif trigger == "tab2-quick-all":
-            start_date = df["Date"].min()
-            end_date = df["Date"].max()
+    triggered_id = (
+        ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else "initial load"
+    )
 
-    # Ensure start_date and end_date are timezone-aware (UTC)
-    start_date = pd.to_datetime(start_date)
-    end_date = pd.to_datetime(end_date)
-    if start_date.tzinfo is None:
-        start_date = start_date.tz_localize("UTC")
-    if end_date.tzinfo is None:
-        end_date = end_date.tz_localize("UTC")
+    # --- Determine Date Range ---
+    start_date = start_date_input
+    end_date = end_date_input
+    min_date_allowed = df["Date"].min()
+    max_date_allowed = df["Date"].max()
 
     if not selected_companies:
-        min_date = df["Date"].min()
-        max_date = df["Date"].max()
+        start_date = df["Date"].min()
+        end_date = df["Date"].max()
+        min_date_allowed = start_date
+        max_date_allowed = end_date
         return (
             html.Div(
                 "No company selected.",
                 style={"textAlign": "center", "color": "#888", "padding": "30px"},
             ),
-            min_date,
-            max_date,
-            min_date,
-            max_date,
+            min_date_allowed,
+            max_date_allowed,
+            start_date,
+            end_date,
         )
+    else:
+        company_filtered_df = df[df["Cid"].isin(selected_companies)]
+        if not company_filtered_df.empty:
+            min_date_allowed = company_filtered_df["Date"].min()
+            max_date_allowed = company_filtered_df["Date"].max()
+
+        if triggered_id == "tab2-company-selector":
+            start_date = min_date_allowed
+            end_date = max_date_allowed
+        elif triggered_id == "tab2-quick-7":
+            end_date = max_date_allowed
+            start_date = end_date - pd.Timedelta(days=6)
+        elif triggered_id == "tab2-quick-30":
+            end_date = max_date_allowed
+            start_date = end_date - pd.Timedelta(days=29)
+        elif triggered_id == "tab2-quick-all":
+            start_date = min_date_allowed
+            end_date = max_date_allowed
+
+    try:
+        start_date = pd.to_datetime(start_date)
+        if start_date.tzinfo is None:
+            start_date = start_date.tz_localize("UTC")
+    except:
+        start_date = min_date_allowed
+
+    try:
+        end_date = pd.to_datetime(end_date)
+        if end_date.tzinfo is None:
+            end_date = end_date.tz_localize("UTC")
+    except:
+        end_date = max_date_allowed
+
+    start_date = max(start_date, min_date_allowed)
+    end_date = min(end_date, max_date_allowed)
+    if start_date > end_date:
+        start_date = min_date_allowed
 
     filtered = df[
         (df["Cid"].isin(selected_companies))
@@ -243,20 +265,17 @@ def update_tab2_table(
     ].copy()
 
     if filtered.empty:
-        min_date = df["Date"].min()
-        max_date = df["Date"].max()
         return (
             html.Div(
                 "No data for the selection.",
                 style={"textAlign": "center", "color": "#888", "padding": "30px"},
             ),
-            min_date,
-            max_date,
-            min_date,
-            max_date,
+            min_date_allowed,
+            max_date_allowed,
+            start_date,
+            end_date,
         )
 
-    # Group by Date and Company, aggregate
     grouped = (
         filtered.groupby(["Date", "Cid", "Company"])
         .agg(
@@ -275,9 +294,6 @@ def update_tab2_table(
         grouped[col] = grouped[col].round(2)
     grouped["Std"] = grouped["Std"].fillna(0)
     grouped["Mean"] = grouped["Mean"].fillna(0)
-
-    min_date = filtered["Date"].min()
-    max_date = filtered["Date"].max()
 
     return (
         dash_table.DataTable(
@@ -311,8 +327,8 @@ def update_tab2_table(
             ],
             page_size=page_size,
         ),
-        min_date,
-        max_date,
+        min_date_allowed,
+        max_date_allowed,
         start_date,
         end_date,
     )
