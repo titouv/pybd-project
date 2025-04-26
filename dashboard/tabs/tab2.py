@@ -163,98 +163,114 @@ def get_stock_data(cids=None, start_date=None, end_date=None):
 
 tab2_layout = html.Div(
     [
-        dbc.Row(
+        html.Div(
             [
-                # Column 1: Date Range Picker
-                dbc.Col(
+                # Controls container
+                dbc.Row(
                     [
-                        html.H5("Date Range"),
-                        dcc.DatePickerRange(
-                            id="tab2-date-picker",
-                            display_format="DD/MM/YYYY",
-                            start_date=None,
-                            end_date=None,
-                            min_date_allowed=None,
-                            max_date_allowed=None,
-                            style={"width": "100%"},
-                        ),
-                        html.Div(
-                            [
-                                dbc.Button(
-                                    "Last 7 Days",
-                                    id="tab2-quick-7",
-                                    color="light",
-                                    size="sm",
-                                    className="mr-1 mt-1",
-                                ),
-                                dbc.Button(
-                                    "Last 30 Days",
-                                    id="tab2-quick-30",
-                                    color="light",
-                                    size="sm",
-                                    className="mr-1 mt-1",
-                                ),
-                                dbc.Button(
-                                    "All time",
-                                    id="tab2-quick-all",
-                                    color="light",
-                                    size="sm",
-                                    className="mt-1",
-                                ),
-                            ],
-                            className="mt-1",
+                        dbc.Col(
+                            html.Div(
+                                [
+                                    dcc.DatePickerRange(
+                                        id="tab2-date-picker",
+                                        display_format="DD/MM/YYYY",
+                                        start_date=None,
+                                        end_date=None,
+                                        min_date_allowed=None,
+                                        max_date_allowed=None,
+                                        style={"marginRight": "10px"},
+                                    ),
+                                    dcc.Dropdown(
+                                        id="tab2-company-selector",
+                                        options=get_all_company_options(),
+                                        value=[],
+                                        multi=True,
+                                        placeholder="Search and select companies...",
+                                        style={"minWidth": "300px", "flex": "1"},
+                                    ),
+                                ],
+                                style={
+                                    "display": "flex",
+                                    "alignItems": "center",
+                                    "gap": "10px",
+                                    "width": "100%",
+                                },
+                            ),
+                            width=12,
                         ),
                     ],
-                    width=4,
+                    className="mb-2",
+                    align="center",
+                    justify="start",
                 ),
-                # Column 2: Company Selector
-                dbc.Col(
+                # Quick select buttons and row selector on the same row
+                dbc.Row(
                     [
-                        html.H5("Company"),
-                        dcc.Dropdown(
-                            id="tab2-company-selector",
-                            options=get_all_company_options(),
-                            value=[],
-                            multi=True,
-                            placeholder="Select companies...",
+                        dbc.Col(
+                            dbc.ButtonGroup(
+                                [
+                                    dbc.Button(
+                                        "Last 7 days",
+                                        id="tab2-quick-7",
+                                        n_clicks=0,
+                                        color="secondary",
+                                    ),
+                                    dbc.Button(
+                                        "Last 30 days",
+                                        id="tab2-quick-30",
+                                        n_clicks=0,
+                                        color="secondary",
+                                    ),
+                                    dbc.Button(
+                                        "All time",
+                                        id="tab2-quick-all",
+                                        n_clicks=0,
+                                        color="secondary",
+                                    ),
+                                ],
+                                size="sm",
+                            ),
+                            width="auto",
+                        ),
+                        dbc.Col(
+                            dcc.Dropdown(
+                                id="tab2-page-size",
+                                options=[
+                                    {"label": str(n), "value": n}
+                                    for n in [10, 20, 50, 100]
+                                ],
+                                value=20,
+                                clearable=False,
+                                style={"width": "100px"},
+                            ),
+                            width="auto",
+                            style={
+                                "display": "flex",
+                                "alignItems": "center",
+                                "justifyContent": "flex-end",
+                            },
                         ),
                     ],
-                    width=5,
+                    className="mb-3",
+                    align="center",
+                    justify="between",
                 ),
-                # Column 3: Rows per Page
-                dbc.Col(
+                dbc.Row(
                     [
-                        html.H5("Table Display"),
-                        dbc.Label("Rows per page:"),
-                        dcc.Dropdown(
-                            id="tab2-page-size",
-                            options=[
-                                {"label": str(size), "value": size}
-                                for size in [10, 20, 50, 100]
-                            ],
-                            value=10,
-                            clearable=False,
-                            style={"width": "100px"},
+                        dbc.Col(
+                            dcc.Loading(
+                                id="loading-tab2-table",
+                                type="circle",
+                                children=html.Div(id="tab2-table-container"),
+                            ),
+                            width=12,
                         ),
-                    ],
-                    width=3,
+                    ]
                 ),
             ],
-            className="align-items-start",
+            style={"padding": "30px"},
         ),
-        dbc.Row(
-            dbc.Col(
-                dcc.Loading(
-                    id="loading-tab2-table",
-                    type="circle",
-                    children=html.Div(id="tab2-table-container"),
-                ),
-                width=12,
-            ),
-            className="mt-3",
-        ),
-    ],
-    style={"padding": "20px"},
+    ]
 )
 
 
