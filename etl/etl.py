@@ -357,7 +357,9 @@ def handle_daystocks(raw_euronext,raw_boursorama, db):
         high=('value', 'max'),
         low=('value', 'min'),
         close=('value', 'last'),
-        volume=('volume', 'sum')
+        volume=('volume', 'sum'),
+        mean=('value', 'mean'),
+        std=('value', 'std')
     ).reset_index() # Reset index to get 'company_id' and 'date' back as columns
 
     # Rename columns to match daystocks_db_dataframe
@@ -366,7 +368,7 @@ def handle_daystocks(raw_euronext,raw_boursorama, db):
     print("daystocks_boursorama", daystocks_boursorama.head())
     
     # Keep only relevant columns and ensure correct order
-    daystocks_boursorama = daystocks_boursorama[['date', 'cid', 'open', 'close', 'high', 'low', 'volume']]
+    daystocks_boursorama = daystocks_boursorama[['date', 'cid', 'open', 'close', 'high', 'low', 'volume', 'mean', 'std']]
     
 
     print("Number of rows before dropping nan", len(daystocks_boursorama))
