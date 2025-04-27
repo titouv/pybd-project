@@ -423,8 +423,6 @@ def handle_companies(companies_euronext, companies_bousorama,raw_boursorama,raw_
     companies_db_dataframe = pd.DataFrame(
         columns=[
             "id", "name", "mid", "symbol", "isin", "boursorama", "euronext", 
-            # not used, ricou explains why in moodle question
-            # "pea", "sector1", "sector2", "sector3"
         ],
     )
 
@@ -439,73 +437,50 @@ def handle_companies(companies_euronext, companies_bousorama,raw_boursorama,raw_
     ))
     companies_db_dataframe['symbol'] = merged_companies['symbol']
     companies_db_dataframe['isin'] = merged_companies['isin']
-    # TODO see to fill column boursorama and euronext
     companies_db_dataframe['boursorama'] = merged_companies['boursorama']
     companies_db_dataframe['euronext'] = merged_companies['euronext']
 
-    # print(companies_db_dataframe.head())
-
-    # logger.info("Writing companies data to database")
-    # batch_df_write(companies_db_dataframe, 'companies', db)
-    # logger.info(f"Stored {len(companies_db_dataframe)} companies")
-
-
     # First, ensure full_companies_db_dataframe has an 'id' column if it's empty
     if len(full_companies_db_dataframe) == 0:
-        full_companies_db_dataframe['id'] = []
+        full_companies_db_dataframe = pd.DataFrame(columns=[
+            "id", "name", "mid", "symbol", "isin", "boursorama", "euronext"
+        ])
     
-    # Merge on key identifiers only, not on the optional fields
-    merged_df = pd.merge(
-        full_companies_db_dataframe, 
-        companies_db_dataframe,
-        on=["name", "symbol", "isin"],  # Only merge on key identifiers
-        how='outer',
-        suffixes=('_existing', '_new')
-    )
-    
-    # For each optional field (boursorama, euronext), take the non-null value if available
-    for field in ['boursorama', 'euronext', 'mid']:
-        existing_field = f'{field}_existing'
-        new_field = f'{field}_new'
-        if existing_field in merged_df.columns and new_field in merged_df.columns:
-            merged_df[field] = merged_df[existing_field].combine_first(merged_df[new_field])
-            merged_df.drop(columns=[existing_field, new_field], inplace=True)
-    
-    # Handle IDs
-    merged_df['id'] = merged_df['id_existing'].combine_first(merged_df['id_new'])
-    merged_df.drop(columns=['id_existing', 'id_new'], inplace=True)
-    
-    # For rows without an ID, generate new ones
-    null_ids = merged_df['id'].isna()
-    if null_ids.any():
-        max_id = merged_df['id'].max() if len(merged_df) > 0 else -1
-        if pd.isna(max_id):
-            max_id = -1
-        new_ids = range(int(max_id) + 1, int(max_id) + 1 + null_ids.sum())
-        merged_df.loc[null_ids, 'id'] = list(new_ids)
-    
-    # Ensure id is integer type
-    merged_df['id'] = merged_df['id'].astype(int)
-    
-    # Update the full companies dataframe
-    full_companies_db_dataframe = merged_df[['id', 'name', 'mid', 'symbol', 'isin', 'boursorama', 'euronext']]
-    
-    # Sort by ID for consistency
-    full_companies_db_dataframe.sort_values(by=['id'], inplace=True)
-    full_companies_db_dataframe.reset_index(drop=True, inplace=True)
-    
-    # Identify and write new companies to database
+    # Identify existing companies by checking all identifying fields
     existing_companies = pd.merge(
         companies_db_dataframe,
         full_companies_db_dataframe,
-        on=['name', 'symbol', 'isin'],
-        how='right',
-        indicator=True
+        on=['symbol', 'name', 'isin', 'mid'],  # Added 'mid' to ensure market matches too
+        how='left',
+        indicator=True,
+        suffixes=('', '_existing')
     )
     
-    new_companies = full_companies_db_dataframe[existing_companies['_merge'] == 'right_only']
+    # For companies that exist, use their existing IDs
+    mask_existing = existing_companies['_merge'] == 'both'
+    companies_db_dataframe.loc[mask_existing, 'id'] = existing_companies.loc[mask_existing, 'id_existing']
+    
+    # Find truly new companies (those not in full_companies_db_dataframe)
+    new_companies = companies_db_dataframe[~mask_existing].copy()
     
     if len(new_companies) > 0:
+        # Generate new IDs for new companies
+        max_id = full_companies_db_dataframe['id'].max() if len(full_companies_db_dataframe) > 0 else -1
+        if pd.isna(max_id):
+            max_id = -1
+        new_companies['id'] = range(int(max_id) + 1, int(max_id) + 1 + len(new_companies))
+        
+        # Ensure id is integer type
+        new_companies['id'] = new_companies['id'].astype(int)
+        
+        # Add new companies to full_companies_db_dataframe
+        full_companies_db_dataframe = pd.concat([full_companies_db_dataframe, new_companies], ignore_index=True)
+        
+        # Sort by ID for consistency
+        full_companies_db_dataframe.sort_values(by=['id'], inplace=True)
+        full_companies_db_dataframe.reset_index(drop=True, inplace=True)
+        
+        # Write only the new companies to the database
         logger.info(f"Writing {len(new_companies)} new companies to database")
         batch_df_write(new_companies, 'companies', db)
         logger.info(f"Stored {len(new_companies)} new companies")
@@ -515,13 +490,13 @@ def handle_companies(companies_euronext, companies_bousorama,raw_boursorama,raw_
     print("ID range:", full_companies_db_dataframe['id'].min(), "to", full_companies_db_dataframe['id'].max())
     print(f"Total number of companies after processing : {len(full_companies_db_dataframe)}")
 
-    # add column company_id into raw_boursorama and raw_euronext
+    # Update company_id mappings for raw data using the full_companies_db_dataframe
+    # This ensures we use consistent IDs for both new and existing companies
     bousorama_to_id = dict(zip(full_companies_db_dataframe['boursorama'], full_companies_db_dataframe['id']))
     raw_boursorama['company_id'] = raw_boursorama['symbol'].map(bousorama_to_id)
 
     euronext_to_id = dict(zip(full_companies_db_dataframe['euronext'], full_companies_db_dataframe['id']))
     raw_euronext['company_id'] = raw_euronext['Name'].map(euronext_to_id)
-    
 
 
 def load_year(year:str, db:TSDB):
