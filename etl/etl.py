@@ -201,140 +201,46 @@ def batch_df_write(df, table_name, db, batch_size=BATCH_SIZE):
         
     logger.info(f"Completed writing {total_rows} rows to {table_name}")
 
+def get_clean_last_boursorama(df):
+    """last is of object type and sometimes ends with (c) or (s)"""
+    return [
+        float(re.split("\\(.\\)$", str(x))[0].replace(" ", "").replace(",", "."))
+        for x in df["last"]
+    ]
 
-def load_year(year:str, db:TSDB):
-    global full_companies_db_dataframe
-    logger.info(f"Starting ETL process for year {year}")
-
-
-    logger.info(f"Reading raw Boursorama data for year {year}")
-    raw_boursorama = read_raw_bousorama(year)
-    logger.info(f"Cleaning raw Boursorama data ({len(raw_boursorama)} rows)")
-    raw_boursorama = clean_raw_bousorama(raw_boursorama)
-    logger.info("Extracting unique companies from Boursorama data")
-    companies_bousorama = make_subset_of_companies_bousorama(raw_boursorama)
-    logger.info(f"Adding market information to Boursorama companies ({len(companies_bousorama)} rows)")
-    companies_bousorama = add_market_column_boursorama(companies_bousorama)
-    logger.info("Normalizing Boursorama companies dataframe")
-    companies_bousorama = make_normalized_dataframe_boursorama(companies_bousorama)
-
-    logger.info(f"Reading raw Euronext data for year {year}")
-    raw_euronext = read_raw_euronext(year)
-    logger.info(f"Cleaning raw Euronext data ({len(raw_euronext)} rows)")
-    raw_euronext = clean_raw_euronext(raw_euronext)
-    logger.info("Extracting unique companies from Euronext data")
-    companies_euronext = make_subset_of_companies_euronext(raw_euronext)
-    logger.info(f"Adding market information to Euronext companies ({len(companies_euronext)} rows)")
-    companies_euronext = add_market_column_euronext(companies_euronext)
-    logger.info("Normalizing Euronext companies dataframe")
-    companies_euronext = make_normalized_dataframe_euronext(companies_euronext)
-
-    logger.info("Merging Boursorama and Euronext company data")
-    merged_companies = pd.merge(companies_euronext, companies_bousorama, 
-                            left_on=['symbol', 'name', 'market'], 
-                            right_on=['symbol', 'name', 'market'], 
-                            how='outer')
-    print(merged_companies.head())
-    logger.info(f"Merged companies dataframe created ({len(merged_companies)} rows)")
-    
-    companies_db_dataframe = pd.DataFrame(
+def handle_stocks(raw_boursorama):
+    logger.info("Preparing stocks data from Boursorama")
+    # create stocks for boursorama
+    stocks_db_dataframe = pd.DataFrame(
         columns=[
-            "id", "name", "mid", "symbol", "isin", "boursorama", "euronext", 
-            # not used, ricou explains why in moodle question
-            # "pea", "sector1", "sector2", "sector3"
+           "date", "cid", "value", "volume"
         ],
     )
 
-    # generate id
-    companies_db_dataframe['id'] = merged_companies.index
-    companies_db_dataframe['name'] = merged_companies['name']
-    # adapt from name (2 columns) to mid (1 column)
-    companies_db_dataframe['mid'] = merged_companies['market'].apply(lambda x: next(
-        (market[1] for market in initial_markets_data 
-         if market[3] and market[3] in x),
-        "100"  # Default value if no match found
-    ))
-    companies_db_dataframe['symbol'] = merged_companies['symbol']
-    companies_db_dataframe['isin'] = merged_companies['isin']
-    # TODO see to fill column boursorama and euronext
-    companies_db_dataframe['boursorama'] = merged_companies['boursorama']
-    companies_db_dataframe['euronext'] = merged_companies['euronext']
+    # default index for raw_boursorama is a "date" and "symbol"
+    # we want to convert this index to a "date" only
+    raw_boursorama = raw_boursorama.drop(columns=['symbol'])
+    raw_boursorama.reset_index(inplace=True)
 
-    # print(companies_db_dataframe.head())
+    raw_boursorama['date'] = pd.to_datetime(raw_boursorama['level_0'])
 
-    # logger.info("Writing companies data to database")
-    # batch_df_write(companies_db_dataframe, 'companies', db)
-    # logger.info(f"Stored {len(companies_db_dataframe)} companies")
+    stocks_db_dataframe['date'] =  raw_boursorama['date']
 
 
-    # merge companies_db_dataframe with full_companies_db_dataframe on all columns except id
-    # if not found, add a new line
-    # after that write the new one to db
-    print(f"number of companies for year {year} : {len(companies_db_dataframe)}")
-    print(f"number of all companies before merge : {len(full_companies_db_dataframe)}")
-    
-    # First, ensure full_companies_db_dataframe has an 'id' column if it's empty
-    if len(full_companies_db_dataframe) == 0:
-        full_companies_db_dataframe['id'] = []
-    
-    # Merge while preserving existing IDs
-    full_companies_db_dataframe = pd.merge(
-        full_companies_db_dataframe, 
-        companies_db_dataframe,
-        on=["name", "mid", "symbol", "isin", "boursorama", "euronext"],
-        how='outer'
-    )
-    
-    print(f"number of all companies after merge : {len(full_companies_db_dataframe)}")
-    
-    # Identify new companies (those without an existing ID)
-    new_companies_mask = full_companies_db_dataframe['id_x'].isna()
-    new_companies = full_companies_db_dataframe[new_companies_mask].copy()
-    
-    if len(new_companies) > 0:
-        # For new companies, assign new sequential IDs
-        max_id = full_companies_db_dataframe['id_x'].max() if len(full_companies_db_dataframe) > 0 else -1
-        if pd.isna(max_id):
-            max_id = -1
-        new_ids = range(int(max_id) + 1, int(max_id) + 1 + len(new_companies))
-        new_companies['id'] = list(new_ids)
-        
-        # Update the full DataFrame with new IDs
-        full_companies_db_dataframe.loc[new_companies_mask, 'id'] = new_companies['id']
-        
-        # Clean up merge columns in new_companies DataFrame
-        new_companies = new_companies[['id', 'name', 'mid', 'symbol', 'isin', 'boursorama', 'euronext']]
-        
-        logger.info(f"Writing {len(new_companies)} new companies to database")
-        batch_df_write(new_companies, 'companies', db)
-        logger.info(f"Stored {len(new_companies)} new companies")
-    else:
-        logger.info("No new companies to write to database")
-    
-    # Clean up merge columns in full DataFrame
-    if 'id_x' in full_companies_db_dataframe.columns:
-        full_companies_db_dataframe['id'] = full_companies_db_dataframe['id_x'].fillna(full_companies_db_dataframe['id'])
-        full_companies_db_dataframe.drop(columns=['id_x', 'id_y'], inplace=True)
-    
-    # Ensure id column is integer type
-    full_companies_db_dataframe['id'] = full_companies_db_dataframe['id'].astype(int)
-    
-    # Sort by ID for consistency
-    full_companies_db_dataframe.sort_values(by=['id'], inplace=True)
-    full_companies_db_dataframe.reset_index(drop=True, inplace=True)
-    
-    print("ID range:", full_companies_db_dataframe['id'].min(), "to", full_companies_db_dataframe['id'].max())
-    print(f"Total number of companies after processing year {year}: {len(full_companies_db_dataframe)}")
+    stocks_db_dataframe['cid'] = raw_boursorama['company_id']
+    stocks_db_dataframe['value'] = get_clean_last_boursorama(raw_boursorama)
+    stocks_db_dataframe['volume'] = raw_boursorama['volume']
+    stocks_db_dataframe
 
-    # add column company_id into raw_boursorama and raw_euronext
-    bousorama_to_id = dict(zip(full_companies_db_dataframe['boursorama'], full_companies_db_dataframe['id']))
-    raw_boursorama['company_id'] = raw_boursorama['symbol'].map(bousorama_to_id)
+    logger.info("Writing stocks data to database")
+    # batch_df_write(stocks_db_dataframe, 'stocks', db)
+    logger.info(f"Stored {len(stocks_db_dataframe)} stocks entries")
 
-    euronext_to_id = dict(zip(full_companies_db_dataframe['euronext'], full_companies_db_dataframe['id']))
-    raw_euronext['company_id'] = raw_euronext['Name'].map(euronext_to_id)
-    
+
+def handle_daystocks(raw_euronext,raw_boursorama):
     logger.info("Preparing daystocks data from Euronext")
-    # create daystocks for euronext
+
+       # create daystocks for euronext
     daystocks_db_dataframe = pd.DataFrame(
         columns=[
            "date", "cid", "open", "close", "high", "low", "volume", "mean", "std"
@@ -390,12 +296,7 @@ def load_year(year:str, db:TSDB):
     # Now set the 'date' column as the index
     raw_boursorama_agg = raw_boursorama_agg.set_index('date').sort_index() 
 
-    def get_clean_last_boursorama(df):
-        """last is of object type and sometimes ends with (c) or (s)"""
-        return [
-            float(re.split("\\(.\\)$", str(x))[0].replace(" ", "").replace(",", "."))
-            for x in df["last"]
-        ]
+ 
 
     # Clean the 'last' column *before* aggregation
     raw_boursorama_agg['value'] = get_clean_last_boursorama(raw_boursorama_agg)
@@ -456,37 +357,150 @@ def load_year(year:str, db:TSDB):
 
     logger.info(f"Combined dataframe now contains {len(daystocks_db_dataframe)} rows.")
 
-
     logger.info("Writing daystocks data to database")
     batch_df_write(daystocks_db_dataframe, 'daystocks', db)
     logger.info(f"Stored {len(daystocks_db_dataframe)} daystocks entries")
 
-    logger.info("Preparing stocks data from Boursorama")
-    # create stocks for boursorama
-    stocks_db_dataframe = pd.DataFrame(
+def handle_companies(companies_euronext, companies_bousorama,raw_boursorama,raw_euronext):
+    global full_companies_db_dataframe
+    logger.info("Merging Boursorama and Euronext company data")
+    merged_companies = pd.merge(companies_euronext, companies_bousorama, 
+                            left_on=['symbol', 'name', 'market'], 
+                            right_on=['symbol', 'name', 'market'], 
+                            how='outer')
+    print(merged_companies.head())
+    logger.info(f"Merged companies dataframe created ({len(merged_companies)} rows)")
+    
+    companies_db_dataframe = pd.DataFrame(
         columns=[
-           "date", "cid", "value", "volume"
+            "id", "name", "mid", "symbol", "isin", "boursorama", "euronext", 
+            # not used, ricou explains why in moodle question
+            # "pea", "sector1", "sector2", "sector3"
         ],
     )
 
-    # default index for raw_boursorama is a "date" and "symbol"
-    # we want to convert this index to a "date" only
-    raw_boursorama = raw_boursorama.drop(columns=['symbol'])
-    raw_boursorama.reset_index(inplace=True)
+    # generate id
+    companies_db_dataframe['id'] = merged_companies.index
+    companies_db_dataframe['name'] = merged_companies['name']
+    # adapt from name (2 columns) to mid (1 column)
+    companies_db_dataframe['mid'] = merged_companies['market'].apply(lambda x: next(
+        (market[1] for market in initial_markets_data 
+         if market[3] and market[3] in x),
+        "100"  # Default value if no match found
+    ))
+    companies_db_dataframe['symbol'] = merged_companies['symbol']
+    companies_db_dataframe['isin'] = merged_companies['isin']
+    # TODO see to fill column boursorama and euronext
+    companies_db_dataframe['boursorama'] = merged_companies['boursorama']
+    companies_db_dataframe['euronext'] = merged_companies['euronext']
 
-    raw_boursorama['date'] = pd.to_datetime(raw_boursorama['level_0'])
+    # print(companies_db_dataframe.head())
 
-    stocks_db_dataframe['date'] =  raw_boursorama['date']
+    # logger.info("Writing companies data to database")
+    # batch_df_write(companies_db_dataframe, 'companies', db)
+    # logger.info(f"Stored {len(companies_db_dataframe)} companies")
 
 
-    stocks_db_dataframe['cid'] = raw_boursorama['company_id']
-    stocks_db_dataframe['value'] = get_clean_last_boursorama(raw_boursorama)
-    stocks_db_dataframe['volume'] = raw_boursorama['volume']
-    stocks_db_dataframe
+    # merge companies_db_dataframe with full_companies_db_dataframe on all columns except id
+    # if not found, add a new line
+    # after that write the new one to db
+    print(f"number of companies : {len(companies_db_dataframe)}")
+    print(f"number of all companies before merge : {len(full_companies_db_dataframe)}")
+    
+    # First, ensure full_companies_db_dataframe has an 'id' column if it's empty
+    if len(full_companies_db_dataframe) == 0:
+        full_companies_db_dataframe['id'] = []
+    
+    # Merge while preserving existing IDs
+    full_companies_db_dataframe = pd.merge(
+        full_companies_db_dataframe, 
+        companies_db_dataframe,
+        on=["name", "mid", "symbol", "isin", "boursorama", "euronext"],
+        how='outer'
+    )
+    
+    print(f"number of all companies after merge : {len(full_companies_db_dataframe)}")
+    
+    # Identify new companies (those without an existing ID)
+    new_companies_mask = full_companies_db_dataframe['id_x'].isna()
+    new_companies = full_companies_db_dataframe[new_companies_mask].copy()
+    
+    if len(new_companies) > 0:
+        # For new companies, assign new sequential IDs
+        max_id = full_companies_db_dataframe['id_x'].max() if len(full_companies_db_dataframe) > 0 else -1
+        if pd.isna(max_id):
+            max_id = -1
+        new_ids = range(int(max_id) + 1, int(max_id) + 1 + len(new_companies))
+        new_companies['id'] = list(new_ids)
+        
+        # Update the full DataFrame with new IDs
+        full_companies_db_dataframe.loc[new_companies_mask, 'id'] = new_companies['id']
+        
+        # Clean up merge columns in new_companies DataFrame
+        new_companies = new_companies[['id', 'name', 'mid', 'symbol', 'isin', 'boursorama', 'euronext']]
+        
+        logger.info(f"Writing {len(new_companies)} new companies to database")
+        batch_df_write(new_companies, 'companies', db)
+        logger.info(f"Stored {len(new_companies)} new companies")
+    else:
+        logger.info("No new companies to write to database")
+    
+    # Clean up merge columns in full DataFrame
+    if 'id_x' in full_companies_db_dataframe.columns:
+        full_companies_db_dataframe['id'] = full_companies_db_dataframe['id_x'].fillna(full_companies_db_dataframe['id'])
+        full_companies_db_dataframe.drop(columns=['id_x', 'id_y'], inplace=True)
+    
+    # Ensure id column is integer type
+    full_companies_db_dataframe['id'] = full_companies_db_dataframe['id'].astype(int)
+    
+    # Sort by ID for consistency
+    full_companies_db_dataframe.sort_values(by=['id'], inplace=True)
+    full_companies_db_dataframe.reset_index(drop=True, inplace=True)
+    
+    print("ID range:", full_companies_db_dataframe['id'].min(), "to", full_companies_db_dataframe['id'].max())
+    print(f"Total number of companies after processing : {len(full_companies_db_dataframe)}")
 
-    logger.info("Writing stocks data to database")
-    # batch_df_write(stocks_db_dataframe, 'stocks', db)
-    logger.info(f"Stored {len(stocks_db_dataframe)} stocks entries")
+    # add column company_id into raw_boursorama and raw_euronext
+    bousorama_to_id = dict(zip(full_companies_db_dataframe['boursorama'], full_companies_db_dataframe['id']))
+    raw_boursorama['company_id'] = raw_boursorama['symbol'].map(bousorama_to_id)
+
+    euronext_to_id = dict(zip(full_companies_db_dataframe['euronext'], full_companies_db_dataframe['id']))
+    raw_euronext['company_id'] = raw_euronext['Name'].map(euronext_to_id)
+    
+
+
+def load_year(year:str, db:TSDB):
+    logger.info(f"Starting ETL process for year {year}")
+
+
+    logger.info(f"Reading raw Boursorama data for year {year}")
+    raw_boursorama = read_raw_bousorama(year)
+    logger.info(f"Cleaning raw Boursorama data ({len(raw_boursorama)} rows)")
+    raw_boursorama = clean_raw_bousorama(raw_boursorama)
+    logger.info("Extracting unique companies from Boursorama data")
+    companies_bousorama = make_subset_of_companies_bousorama(raw_boursorama)
+    logger.info(f"Adding market information to Boursorama companies ({len(companies_bousorama)} rows)")
+    companies_bousorama = add_market_column_boursorama(companies_bousorama)
+    logger.info("Normalizing Boursorama companies dataframe")
+    companies_bousorama = make_normalized_dataframe_boursorama(companies_bousorama)
+
+    logger.info(f"Reading raw Euronext data for year {year}")
+    raw_euronext = read_raw_euronext(year)
+    logger.info(f"Cleaning raw Euronext data ({len(raw_euronext)} rows)")
+    raw_euronext = clean_raw_euronext(raw_euronext)
+    logger.info("Extracting unique companies from Euronext data")
+    companies_euronext = make_subset_of_companies_euronext(raw_euronext)
+    logger.info(f"Adding market information to Euronext companies ({len(companies_euronext)} rows)")
+    companies_euronext = add_market_column_euronext(companies_euronext)
+    logger.info("Normalizing Euronext companies dataframe")
+    companies_euronext = make_normalized_dataframe_euronext(companies_euronext)
+
+    handle_companies(companies_euronext, companies_bousorama,raw_boursorama,raw_euronext)
+    
+    handle_daystocks(raw_euronext, raw_boursorama)
+
+    handle_stocks(raw_boursorama)
+
 
 @timer_decorator
 def store_files(years:list[str], db:TSDB):
