@@ -448,61 +448,67 @@ def handle_companies(companies_euronext, companies_bousorama,raw_boursorama,raw_
     # logger.info(f"Stored {len(companies_db_dataframe)} companies")
 
 
-    # merge companies_db_dataframe with full_companies_db_dataframe on all columns except id
-    # if not found, add a new line
-    # after that write the new one to db
-    print(f"number of companies : {len(companies_db_dataframe)}")
-    print(f"number of all companies before merge : {len(full_companies_db_dataframe)}")
-    
     # First, ensure full_companies_db_dataframe has an 'id' column if it's empty
     if len(full_companies_db_dataframe) == 0:
         full_companies_db_dataframe['id'] = []
     
-    # Merge while preserving existing IDs
-    full_companies_db_dataframe = pd.merge(
+    # Merge on key identifiers only, not on the optional fields
+    merged_df = pd.merge(
         full_companies_db_dataframe, 
         companies_db_dataframe,
-        on=["name", "mid", "symbol", "isin", "boursorama", "euronext"],
-        how='outer'
+        on=["name", "symbol", "isin"],  # Only merge on key identifiers
+        how='outer',
+        suffixes=('_existing', '_new')
     )
     
-    print(f"number of all companies after merge : {len(full_companies_db_dataframe)}")
+    # For each optional field (boursorama, euronext), take the non-null value if available
+    for field in ['boursorama', 'euronext', 'mid']:
+        existing_field = f'{field}_existing'
+        new_field = f'{field}_new'
+        if existing_field in merged_df.columns and new_field in merged_df.columns:
+            merged_df[field] = merged_df[existing_field].combine_first(merged_df[new_field])
+            merged_df.drop(columns=[existing_field, new_field], inplace=True)
     
-    # Identify new companies (those without an existing ID)
-    new_companies_mask = full_companies_db_dataframe['id_x'].isna()
-    new_companies = full_companies_db_dataframe[new_companies_mask].copy()
+    # Handle IDs
+    merged_df['id'] = merged_df['id_existing'].combine_first(merged_df['id_new'])
+    merged_df.drop(columns=['id_existing', 'id_new'], inplace=True)
     
-    if len(new_companies) > 0:
-        # For new companies, assign new sequential IDs
-        max_id = full_companies_db_dataframe['id_x'].max() if len(full_companies_db_dataframe) > 0 else -1
+    # For rows without an ID, generate new ones
+    null_ids = merged_df['id'].isna()
+    if null_ids.any():
+        max_id = merged_df['id'].max() if len(merged_df) > 0 else -1
         if pd.isna(max_id):
             max_id = -1
-        new_ids = range(int(max_id) + 1, int(max_id) + 1 + len(new_companies))
-        new_companies['id'] = list(new_ids)
-        
-        # Update the full DataFrame with new IDs
-        full_companies_db_dataframe.loc[new_companies_mask, 'id'] = new_companies['id']
-        
-        # Clean up merge columns in new_companies DataFrame
-        new_companies = new_companies[['id', 'name', 'mid', 'symbol', 'isin', 'boursorama', 'euronext']]
-        
+        new_ids = range(int(max_id) + 1, int(max_id) + 1 + null_ids.sum())
+        merged_df.loc[null_ids, 'id'] = list(new_ids)
+    
+    # Ensure id is integer type
+    merged_df['id'] = merged_df['id'].astype(int)
+    
+    # Update the full companies dataframe
+    full_companies_db_dataframe = merged_df[['id', 'name', 'mid', 'symbol', 'isin', 'boursorama', 'euronext']]
+    
+    # Sort by ID for consistency
+    full_companies_db_dataframe.sort_values(by=['id'], inplace=True)
+    full_companies_db_dataframe.reset_index(drop=True, inplace=True)
+    
+    # Identify and write new companies to database
+    existing_companies = pd.merge(
+        companies_db_dataframe,
+        full_companies_db_dataframe,
+        on=['name', 'symbol', 'isin'],
+        how='right',
+        indicator=True
+    )
+    
+    new_companies = full_companies_db_dataframe[existing_companies['_merge'] == 'right_only']
+    
+    if len(new_companies) > 0:
         logger.info(f"Writing {len(new_companies)} new companies to database")
         batch_df_write(new_companies, 'companies', db)
         logger.info(f"Stored {len(new_companies)} new companies")
     else:
         logger.info("No new companies to write to database")
-    
-    # Clean up merge columns in full DataFrame
-    if 'id_x' in full_companies_db_dataframe.columns:
-        full_companies_db_dataframe['id'] = full_companies_db_dataframe['id_x'].fillna(full_companies_db_dataframe['id'])
-        full_companies_db_dataframe.drop(columns=['id_x', 'id_y'], inplace=True)
-    
-    # Ensure id column is integer type
-    full_companies_db_dataframe['id'] = full_companies_db_dataframe['id'].astype(int)
-    
-    # Sort by ID for consistency
-    full_companies_db_dataframe.sort_values(by=['id'], inplace=True)
-    full_companies_db_dataframe.reset_index(drop=True, inplace=True)
     
     print("ID range:", full_companies_db_dataframe['id'].min(), "to", full_companies_db_dataframe['id'].max())
     print(f"Total number of companies after processing : {len(full_companies_db_dataframe)}")
