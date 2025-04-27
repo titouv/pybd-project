@@ -35,3 +35,9 @@ This command will build the docker images for the ETL and the dashboard, it will
 - `dashboard`: the dashboard
 
 You can then access the dashboard at `http://localhost:8050`
+
+## Students
+
+- Titouan Verhille
+- Enguerrand Turcat
+- Matthew Banawa
