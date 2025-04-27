@@ -11,7 +11,7 @@ import mylogging  # Import the logging library
 
 TSDB = tsdb.TimescaleStockMarketModel
 HOME = "/home/bourse/data/"   # we expect subdirectories boursorama and euronext
-HOME = "./data/" # for local testing
+#HOME = "./data/" # for local testing
 BATCH_SIZE = 100_000  # Default batch size for database writes
 
 # Instantiate logger
@@ -594,8 +594,8 @@ def store_files(years:list[str], db:TSDB):
 if __name__ == '__main__':
     print("Go Extract Transform and Load")
     pd.set_option('display.max_columns', None)  # usefull for dedugging
-    # db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'db', 'monmdp')        # inside docker
-    db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'localhost', 'monmdp') # outside docker
+    db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'db', 'monmdp')        # inside docker
+    # db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'localhost', 'monmdp') # outside docker
     years = ["2019", "2020", "2021", "2022", "2023", "2024"]
     print("Start Extract Transform and Load")
     store_files(years, db)
