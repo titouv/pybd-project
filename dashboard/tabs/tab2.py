@@ -27,11 +27,12 @@ def get_all_company_options():
     Fetches all companies for populating the dropdown.
     """
     query = """
-        SELECT
+        SELECT DISTINCT
             c.id as cid,
             c.name as company,
             c.symbol as symbol
         FROM companies c
+        INNER JOIN daystocks ds ON c.id = ds.cid
         ORDER BY c.name ASC
     """
     companies_df = db.df_query(query)
