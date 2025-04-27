@@ -230,11 +230,57 @@ def handle_stocks(raw_boursorama, db):
     stocks_db_dataframe['cid'] = raw_boursorama['company_id']
     stocks_db_dataframe['value'] = get_clean_last_boursorama(raw_boursorama)
     stocks_db_dataframe['volume'] = raw_boursorama['volume']
-    stocks_db_dataframe
+    
+    # Remove rows with missing company IDs as they cannot be processed correctly
+    initial_rows = len(stocks_db_dataframe)
+    stocks_db_dataframe.dropna(subset=['cid'], inplace=True)
+    if initial_rows > len(stocks_db_dataframe):
+        logger.warning(f"Removed {initial_rows - len(stocks_db_dataframe)} rows with missing company IDs (cid).")
 
-    logger.info("Writing stocks data to database")
-    batch_df_write(stocks_db_dataframe, 'stocks', db)
-    logger.info(f"Stored {len(stocks_db_dataframe)} stocks entries")
+    # Ensure cid is integer type for proper grouping
+    stocks_db_dataframe['cid'] = stocks_db_dataframe['cid'].astype(int)
+
+    # --- Filtering logic starts here ---
+    logger.info(f"Initial number of stock entries: {len(stocks_db_dataframe)}")
+
+    # 1. Sort by company ID and date
+    stocks_db_dataframe.sort_values(by=['cid', 'date'], inplace=True)
+
+    # 2. Remove rows with volume == 0
+    rows_before_volume_filter = len(stocks_db_dataframe)
+    stocks_db_dataframe = stocks_db_dataframe[stocks_db_dataframe['volume'] != 0]
+    rows_after_volume_filter = len(stocks_db_dataframe)
+    logger.info(f"Removed {rows_before_volume_filter - rows_after_volume_filter} rows with volume = 0")
+
+    # 3. Identify rows where value is unchanged compared to the previous and next row for the same company
+    stocks_db_dataframe['prev_value'] = stocks_db_dataframe.groupby('cid')['value'].shift(1)
+    stocks_db_dataframe['next_value'] = stocks_db_dataframe.groupby('cid')['value'].shift(-1)
+
+    # Keep a row if:
+    # - It's the first or last record for a company (prev_value or next_value is NaN)
+    # - The value is different from the previous value
+    # - The value is different from the next value
+    keep_mask = (
+        stocks_db_dataframe['prev_value'].isna() | 
+        stocks_db_dataframe['next_value'].isna() | 
+        (stocks_db_dataframe['value'] != stocks_db_dataframe['prev_value']) |
+        (stocks_db_dataframe['value'] != stocks_db_dataframe['next_value'])
+    )
+    
+    filtered_stocks_df = stocks_db_dataframe[keep_mask]
+    
+    # Drop helper columns
+    filtered_stocks_df = filtered_stocks_df.drop(columns=['prev_value', 'next_value'])
+    
+    rows_after_value_filter = len(filtered_stocks_df)
+    logger.info(f"Removed {rows_after_volume_filter - rows_after_value_filter} consecutive rows with unchanged value")
+    logger.info(f"Final number of stock entries after filtering: {rows_after_value_filter}")
+    # --- Filtering logic ends here ---
+
+    logger.info("Writing filtered stocks data to database")
+    # Use the filtered dataframe for writing
+    batch_df_write(filtered_stocks_df, 'stocks', db)
+    logger.info(f"Stored {len(filtered_stocks_df)} filtered stocks entries")
 
 
 def handle_daystocks(raw_euronext,raw_boursorama, db):
