@@ -379,21 +379,30 @@ tab1_layout = html.Div(
                             dbc.CardBody(
                                 [
                                     html.H5("Company Selector", className="card-title"),
-                                    dcc.Dropdown(
-                                        id="company-selector",
-                                        options=get_all_company_options(),
-                                        value=[],
-                                        multi=True,
-                                        placeholder="Search and select companies...",
-                                        style={"marginBottom": "20px"},
-                                        className="hide-dropdown-selection",
-                                    ),
-                                    dbc.Button(
-                                        html.I(className="fas fa-sync-alt"),
-                                        id="tab1-refresh-companies",
-                                        color="light",
-                                        size="sm",
-                                        style={"marginBottom": "20px", "marginLeft": "10px"},
+                                    html.Div(
+                                        [
+                                            dcc.Dropdown(
+                                                id="company-selector",
+                                                options=get_all_company_options(),
+                                                value=[],
+                                                multi=True,
+                                                placeholder="Search and select companies...",
+                                                style={"flex": "1"},
+                                                className="hide-dropdown-selection",
+                                            ),
+                                            dbc.Button(
+                                                html.I(className="fas fa-sync-alt"),
+                                                id="tab1-refresh-companies",
+                                                color="light",
+                                                size="sm",
+                                                style={"marginLeft": "10px"},
+                                            ),
+                                        ],
+                                        style={
+                                            "display": "flex",
+                                            "alignItems": "center",
+                                            "marginBottom": "20px",
+                                        },
                                     ),
                                     html.Div(
                                         id="company-table",
@@ -1030,11 +1039,11 @@ def sync_date_inputs(start_date_picker, end_date_picker, relayout_data, current_
 
 
 @app.callback(
-    ddep.Output("company-selector", "options"),
+    ddep.Output("company-selector", "options", allow_duplicate=True),
     [ddep.Input("tab1-refresh-companies", "n_clicks")],
     prevent_initial_call=True
 )
-def refresh_companies_list(n_clicks):
+def refresh_companies_list_tab1(n_clicks):
     """
     Callback to refresh the companies list when the refresh button is clicked
     """
