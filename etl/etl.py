@@ -579,7 +579,7 @@ if __name__ == '__main__':
     pd.set_option('display.max_columns', None)  # usefull for dedugging
     db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'db', 'monmdp')        # inside docker
     # db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'localhost', 'monmdp') # outside docker
-    years = ["2020"]
+    years = ["2019", "2020", "2021", "2022", "2023", "2024"]
     print("Start Extract Transform and Load")
     store_files(years, db)
     print("Done Extract Transform and Load")
