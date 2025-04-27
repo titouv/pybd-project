@@ -472,7 +472,6 @@ def handle_companies(companies_euronext, companies_bousorama,raw_boursorama,raw_
 def load_year(year:str, db:TSDB):
     logger.info(f"Starting ETL process for year {year}")
 
-
     logger.info(f"Reading raw Boursorama data for year {year}")
     raw_boursorama = read_raw_bousorama(year)
     logger.info(f"Cleaning raw Boursorama data ({len(raw_boursorama)} rows)")
@@ -484,20 +483,31 @@ def load_year(year:str, db:TSDB):
     logger.info("Normalizing Boursorama companies dataframe")
     companies_bousorama = make_normalized_dataframe_boursorama(companies_bousorama)
 
-    logger.info(f"Reading raw Euronext data for year {year}")
-    raw_euronext = read_raw_euronext(year)
-    logger.info(f"Cleaning raw Euronext data ({len(raw_euronext)} rows)")
-    raw_euronext = clean_raw_euronext(raw_euronext)
-    logger.info("Extracting unique companies from Euronext data")
-    companies_euronext = make_subset_of_companies_euronext(raw_euronext)
-    logger.info(f"Adding market information to Euronext companies ({len(companies_euronext)} rows)")
-    companies_euronext = add_market_column_euronext(companies_euronext)
-    logger.info("Normalizing Euronext companies dataframe")
-    companies_euronext = make_normalized_dataframe_euronext(companies_euronext)
+    # Check if there are any Euronext files for this year
+    euronext_files = glob.glob(HOME + 'euronext/*' + year + '*')
+    if not euronext_files:
+        logger.warning(f"No Euronext files found for year {year}. Processing with Boursorama data only.")
+        # Create empty DataFrames for Euronext data
+        raw_euronext = pd.DataFrame(columns=["Name", "ISIN", "Symbol", "Market", "Trading", "Currency", "Open", "High", "Low", "Last", "Last Date/Time", "Time Zone", "Volume", "Turnover"])
+        companies_euronext = pd.DataFrame(columns=['symbol', 'name', 'market', 'isin', 'euronext'])
+    else:
+        logger.info(f"Reading raw Euronext data for year {year}")
+        raw_euronext = read_raw_euronext(year)
+        logger.info(f"Cleaning raw Euronext data ({len(raw_euronext)} rows)")
+        raw_euronext = clean_raw_euronext(raw_euronext)
+        logger.info("Extracting unique companies from Euronext data")
+        companies_euronext = make_subset_of_companies_euronext(raw_euronext)
+        logger.info(f"Adding market information to Euronext companies ({len(companies_euronext)} rows)")
+        companies_euronext = add_market_column_euronext(companies_euronext)
+        logger.info("Normalizing Euronext companies dataframe")
+        companies_euronext = make_normalized_dataframe_euronext(companies_euronext)
 
-    handle_companies(companies_euronext, companies_bousorama,raw_boursorama,raw_euronext)
+    handle_companies(companies_euronext, companies_bousorama, raw_boursorama, raw_euronext)
     
-    handle_daystocks(raw_euronext, raw_boursorama)
+    if not raw_euronext.empty:
+        handle_daystocks(raw_euronext, raw_boursorama)
+    else:
+        logger.info("Skipping daystocks processing for Euronext data as no data is available")
 
     handle_stocks(raw_boursorama)
 
