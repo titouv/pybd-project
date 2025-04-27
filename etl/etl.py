@@ -45,6 +45,7 @@ def read_raw_bousorama(year:str):
     return merge
 
 def clean_raw_bousorama(df):
+    df['name'] = df['name'].str.replace(r'^SRD\s+', '', regex=True)
     return df
 
 def make_subset_of_companies_bousorama(df):
