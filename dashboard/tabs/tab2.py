@@ -191,7 +191,7 @@ tab2_layout = html.Div(
                                         options=get_all_company_options(),
                                         value=[],
                                         multi=True,
-                                        placeholder="Search and select companies...",
+                                        placeholder="Search and select companies... Click the refresh button to update the list.",
                                         style={"minWidth": "300px", "flex": "1"},
                                     ),
                                     dbc.Button(
