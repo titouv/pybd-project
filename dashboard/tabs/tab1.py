@@ -223,7 +223,7 @@ def calculate_bollinger_bands(df, num_std=2, window=20):
 footer = html.Footer(
     html.P(
         [
-            "© 2025 Ricou Bank • ",
+            "© 2025 PYBD Project • ",
             html.A("Contact", href="#"),
             " • ",
             html.A("Privacy", href="#"),
