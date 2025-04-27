@@ -208,7 +208,7 @@ def get_clean_last_boursorama(df):
         for x in df["last"]
     ]
 
-def handle_stocks(raw_boursorama):
+def handle_stocks(raw_boursorama, db):
     logger.info("Preparing stocks data from Boursorama")
     # create stocks for boursorama
     stocks_db_dataframe = pd.DataFrame(
@@ -233,11 +233,11 @@ def handle_stocks(raw_boursorama):
     stocks_db_dataframe
 
     logger.info("Writing stocks data to database")
-    # batch_df_write(stocks_db_dataframe, 'stocks', db)
+    batch_df_write(stocks_db_dataframe, 'stocks', db)
     logger.info(f"Stored {len(stocks_db_dataframe)} stocks entries")
 
 
-def handle_daystocks(raw_euronext,raw_boursorama):
+def handle_daystocks(raw_euronext,raw_boursorama, db):
     logger.info("Preparing daystocks data from Euronext")
 
        # create daystocks for euronext
@@ -361,7 +361,7 @@ def handle_daystocks(raw_euronext,raw_boursorama):
     batch_df_write(daystocks_db_dataframe, 'daystocks', db)
     logger.info(f"Stored {len(daystocks_db_dataframe)} daystocks entries")
 
-def handle_companies(companies_euronext, companies_bousorama,raw_boursorama,raw_euronext):
+def handle_companies(companies_euronext, companies_bousorama,raw_boursorama,raw_euronext, db):
     global full_companies_db_dataframe
     logger.info("Merging Boursorama and Euronext company data")
     merged_companies = pd.merge(companies_euronext, companies_bousorama, 
@@ -502,14 +502,14 @@ def load_year(year:str, db:TSDB):
         logger.info("Normalizing Euronext companies dataframe")
         companies_euronext = make_normalized_dataframe_euronext(companies_euronext)
 
-    handle_companies(companies_euronext, companies_bousorama, raw_boursorama, raw_euronext)
+    handle_companies(companies_euronext, companies_bousorama, raw_boursorama, raw_euronext, db)
     
     if not raw_euronext.empty:
-        handle_daystocks(raw_euronext, raw_boursorama)
+        handle_daystocks(raw_euronext, raw_boursorama, db)
     else:
         logger.info("Skipping daystocks processing for Euronext data as no data is available")
 
-    handle_stocks(raw_boursorama)
+    handle_stocks(raw_boursorama, db)
 
 
 @timer_decorator
@@ -549,7 +549,7 @@ if __name__ == '__main__':
     pd.set_option('display.max_columns', None)  # usefull for dedugging
     # db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'db', 'monmdp')        # inside docker
     db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'localhost', 'monmdp') # outside docker
-    years = ["2020", "2021", "2022", "2023", "2024"]
+    years = ["2019", "2020", "2021", "2022", "2023", "2024"]
     print("Start Extract Transform and Load")
     store_files(years, db)
     print("Done Extract Transform and Load")
