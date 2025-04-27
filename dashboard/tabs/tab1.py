@@ -247,6 +247,10 @@ date_range_store = dcc.Store(
 # Wrapping main content in cards
 tab1_layout = html.Div(
     [
+        html.Link(
+            rel="stylesheet",
+            href="https://use.fontawesome.com/releases/v5.15.4/css/all.css"
+        ),
         bollinger_state_store,
         xaxis_range_store,
         date_range_store,
@@ -383,6 +387,13 @@ tab1_layout = html.Div(
                                         placeholder="Search and select companies...",
                                         style={"marginBottom": "20px"},
                                         className="hide-dropdown-selection",
+                                    ),
+                                    dbc.Button(
+                                        html.I(className="fas fa-sync-alt"),
+                                        id="tab1-refresh-companies",
+                                        color="light",
+                                        size="sm",
+                                        style={"marginBottom": "20px", "marginLeft": "10px"},
                                     ),
                                     html.Div(
                                         id="company-table",
@@ -1016,3 +1027,18 @@ def sync_date_inputs(start_date_picker, end_date_picker, relayout_data, current_
         return [start_date_picker, end_date_picker]
 
     return current_range
+
+
+@app.callback(
+    ddep.Output("company-selector", "options"),
+    [ddep.Input("tab1-refresh-companies", "n_clicks")],
+    prevent_initial_call=True
+)
+def refresh_companies_list(n_clicks):
+    """
+    Callback to refresh the companies list when the refresh button is clicked
+    """
+    if n_clicks is None:
+        raise dash.exceptions.PreventUpdate
+        
+    return get_all_company_options()

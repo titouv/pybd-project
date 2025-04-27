@@ -1,6 +1,7 @@
 import pandas as pd
 from dash import dcc, html, dash_table, callback_context
 import dash.dependencies as ddep
+import dash
 import dash_bootstrap_components as dbc
 from datetime import datetime, timedelta
 
@@ -163,6 +164,10 @@ def get_stock_data(cids=None, start_date=None, end_date=None):
 
 tab2_layout = html.Div(
     [
+        html.Link(
+            rel="stylesheet",
+            href="https://use.fontawesome.com/releases/v5.15.4/css/all.css"
+        ),
         html.Div(
             [
                 # Controls container
@@ -187,6 +192,13 @@ tab2_layout = html.Div(
                                         multi=True,
                                         placeholder="Search and select companies...",
                                         style={"minWidth": "300px", "flex": "1"},
+                                    ),
+                                    dbc.Button(
+                                        html.I(className="fas fa-sync-alt"),
+                                        id="tab2-refresh-companies",
+                                        color="light",
+                                        size="sm",
+                                        style={"marginLeft": "10px"},
                                     ),
                                 ],
                                 style={
@@ -454,3 +466,17 @@ def update_tab2_table(
         start_date_out,
         end_date_out,
     )
+
+@app.callback(
+    ddep.Output("tab2-company-selector", "options"),
+    [ddep.Input("tab2-refresh-companies", "n_clicks")],
+    prevent_initial_call=True
+)
+def refresh_companies_list(n_clicks):
+    """
+    Callback to refresh the companies list when the refresh button is clicked
+    """
+    if n_clicks is None:
+        raise dash.exceptions.PreventUpdate
+        
+    return get_all_company_options()
