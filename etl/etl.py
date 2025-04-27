@@ -431,8 +431,8 @@ def handle_companies(companies_euronext, companies_bousorama,raw_boursorama,raw_
     companies_db_dataframe['name'] = merged_companies['name']
     # adapt from name (2 columns) to mid (1 column)
     companies_db_dataframe['mid'] = merged_companies['market'].apply(lambda x: next(
-        (market[1] for market in initial_markets_data 
-         if market[3] and market[3] in x),
+        (market[0] for market in initial_markets_data 
+         if market[1] and market[1] in x),
         "100"  # Default value if no match found
     ))
     companies_db_dataframe['symbol'] = merged_companies['symbol']
@@ -579,7 +579,7 @@ if __name__ == '__main__':
     pd.set_option('display.max_columns', None)  # usefull for dedugging
     db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'db', 'monmdp')        # inside docker
     # db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'localhost', 'monmdp') # outside docker
-    years = ["2019", "2020", "2021", "2022", "2023", "2024"]
+    years = ["2020"]
     print("Start Extract Transform and Load")
     store_files(years, db)
     print("Done Extract Transform and Load")
